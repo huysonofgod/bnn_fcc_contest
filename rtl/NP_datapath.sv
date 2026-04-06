@@ -1,6 +1,8 @@
 module NP_datapath #(
     parameter int P_W               = 8,
     parameter int MAX_NEURON_INPUTS = 784,
+//    parameter int THRES_W           = 32,
+//    parameter int BEAT_PC_W         = $clog2(P_W + 1),
     parameter int ACC_W             = $clog2(MAX_NEURON_INPUTS + 1)
 ) (
     input  logic                 clk,
@@ -22,6 +24,7 @@ module NP_datapath #(
     output logic                 valid_out,
 
     //DEBUG SIGNALS ---delete once verified correct---
+    //TODO: comment out the debug signals once verified correct to save on routing congestion and potential timing issues
     output logic [P_W-1:0]       dbg_xnor_bits,
     output logic [$clog2(P_W + 1)-1:0] dbg_beat_popcount,
     output logic [ACC_W-1:0]     dbg_acc,
@@ -37,31 +40,30 @@ module NP_datapath #(
     logic [ACC_W-1:0]     beat_popcount_ext;
     logic [ACC_W-1:0]     acc_r_q;
     logic [ACC_W-1:0]     acc_next;
-    logic [ACC_W-1:0]     acc_next_q;
+    logic [ACC_W-1:0]     acc_mux_o;
     logic                 threshold_pass_o;
     logic                 activation_r_q;
     logic [ACC_W-1:0]     out_score_r; // rename for acc_r clarity
     logic                 valid_out_r_q;
-    logic                threshold_pass_mux_o;
+    logic                 threshold_pass_mux_o;
 
 
-     //Output assignments
     // Compute XNOR and popcount
     assign xnor_bits = ~(x_in ^ w_in);
     assign beat_popcount = $countones(xnor_bits);
     // Extend popcount to match accumulator width and compute final sum
     assign beat_popcount_ext = ACC_W'(beat_popcount);
 
-    //Choosing accumulator next value
-    assign acc_next_q = acc_sel ? '0 : acc_next; // Clear accumulator if acc_sel is high, otherwise keep accumulating
 
     //Accumulator aggregatation
     assign acc_next = acc_r_q + beat_popcount_ext;
+    //Choosing accumulator next value
+    assign acc_mux_o = acc_sel ? '0 : acc_next; // Clear accumulator if acc_sel is high, otherwise keep accumulating
 
 
     always_ff @(posedge clk) begin
         if (acc_we) begin
-            acc_r_q <= acc_next_q;
+            acc_r_q <= acc_mux_o;
         end
         if (activation_r_we) begin
             activation_r_q <= threshold_pass_mux_o;
@@ -77,7 +79,11 @@ module NP_datapath #(
         if (rst) begin
             //TODO: check if this reset is necessary given that acc_sel can clear the accumulator to reduce fanout of the reset signal
             //Removing itin the future to opmize for timing, but can add back if needed    
-            acc_r_q <= '0;
+            //Dont need to reset since they are invalid
+            // acc_r_q <= '0;
+            // activation_r_q <= '0;
+            // out_score_r <= '0;
+            valid_out_r_q <= '0;
         end
     end
 
@@ -91,7 +97,7 @@ module NP_datapath #(
     //DEBUG SIGNALS
     assign dbg_xnor_bits     = xnor_bits;
     assign dbg_beat_popcount = beat_popcount;
-    assign dbg_acc         = acc_r_q;
+    assign dbg_acc           = acc_r_q;
     assign dbg_threshold_pass = threshold_pass_o;
 
 endmodule
