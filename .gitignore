@@ -1,2 +1,6 @@
-.vscode/c_cpp_properties.json
+.vscode
 work
+sim.log
+.gitignore
+vsim.wlf
+transcript

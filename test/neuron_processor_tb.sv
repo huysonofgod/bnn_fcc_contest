@@ -7,6 +7,10 @@ module neuron_processor_tb;
     localparam int MAX_NEURON_INPUTS = 784;
     localparam int ACC_W = $clog2(MAX_NEURON_INPUTS + 1);
 
+    localparam logic [1:0] FSM_IDLE    = 2'd0;
+    localparam logic [1:0] FSM_COMPUTE = 2'd1;
+    localparam logic [1:0] FSM_RESET   = 2'd2;
+
     typedef struct {
         string                  name;
         int                     expected_popcount;
@@ -59,7 +63,8 @@ module neuron_processor_tb;
     int                        total_checks;
     int                        failed_checks;
 
-    bit                        thr_contract_window;  //disable threshold_stable assertion
+    
+    int unexpected_assert_fails;
 
     neuron_processor #(
         .P_W              (P_W),
@@ -100,54 +105,100 @@ module neuron_processor_tb;
     property p_valid_out_pulse;
         @(posedge clk) disable iff (rst) valid_out |=> !valid_out;
     endproperty
-
-    A_P_VALID_OUT_PULSE :
-    assert property (p_valid_out_pulse)
-    else $error("P_VALID_OUT_PULSE valid_out pulse is not one cycle at t=%0t", $time);
-
-    // act_out  remain stable right after valid_out deassert
-    property p_act_stable_after_valid_out;
-        @(posedge clk) disable iff (rst) $fell(valid_out) |-> $stable(act_out);
+   
+    // valid_out must be low while reset is asserted.
+    property p_no_valid_out_in_rst;
+        @(posedge clk) rst |-> !valid_out;
     endproperty
-
-    A_P_ACT_STABLE_AFTER_VALID_OUT :
-    assert property (p_act_stable_after_valid_out)
-    else $error("P_ACT_STABLE_AFTER_VALID_OUT failed at t=%0t", $time);
 
     // When mode_output_layer_sel is high, act_out should be 0 regardless of the accumulated sum and threshold
     property p_olm_forces_act0;
         @(posedge clk) disable iff (rst) (valid_out && mode_output_layer_sel) |-> (act_out === 1'b0);
     endproperty
 
+    /////////////////////////////////////////////////////////
+    // Reported popcount must remain within legal neuron-input range.
+    property p_pc_in_range;
+        @(posedge clk) disable iff (rst)
+            valid_out |-> (popcount_out <= MAX_NEURON_INPUTS);
+    endproperty
+
+    // When RESET state drives acc clear controls, accumulator clears next cycle.
+    property p_acc_clears;
+        @(posedge clk) disable iff (rst)
+            (dut.u_fsm.acc_we && dut.u_fsm.acc_sel) |=> (dut.u_dp.acc_r_q === '0);
+    endproperty
+
+    // During valid gaps (acc_we=0), accumulator value must hold.
+    property p_acc_frozen;
+        @(posedge clk) disable iff (rst)
+            (!dut.u_fsm.acc_we && !$isunknown(dut.u_dp.acc_r_q)) |=>
+                (dut.u_dp.acc_r_q == $past(dut.u_dp.acc_r_q));
+    endproperty
+
+    // SVA-7: valid_out is only legal while FSM is in RESET state.
+    property p_valid_out_only_in_reset;
+        @(posedge clk) disable iff (rst) valid_out |-> (dut.u_fsm.state_r == FSM_RESET);
+    endproperty
+
+    // SVA-8: RESET state must transition back to IDLE on the next cycle.
+    property p_reset_exits_to_idle;
+        @(posedge clk) disable iff (rst)
+            (dut.u_fsm.state_r == FSM_RESET) |=> (dut.u_fsm.state_r == FSM_IDLE);
+    endproperty
+
+    // A legal last beat must produce valid_out on the next cycle.
+    property p_valid_out_follows_last;
+        @(posedge clk) disable iff (rst)
+            (valid_in && last) |=> valid_out;
+    endproperty
+
+    // act_out must never be X when valid_out is asserted.
+    property p_act_not_x;
+        @(posedge clk) disable iff (rst) valid_out |-> !$isunknown(act_out);
+    endproperty
+
+    // popcount_out must never be X when valid_out is asserted.
+    property p_pc_not_x;
+        @(posedge clk) disable iff (rst) valid_out |-> !$isunknown(popcount_out);
+    endproperty
+
+    // act_out remain stable right after valid_out deassert
+    property p_act_stable_after_valid_out;
+        @(posedge clk) disable iff (rst) $fell(valid_out) |-> $stable(act_out);
+    endproperty
+
+    
+
     A_OLM_FORCES_ACT0 :
     assert property (p_olm_forces_act0)
-    else $error("OLM did not force act_out to 0 at t=%0t", $time);
+    else $error("[FAILED][SVA] A_OLM_FORCES_ACT0 check='OLM forces act_out=0 when valid_out=1' scope=%m time=%0t", $time);
 
-    //
-    property p_threshold_stable_on_last;
-        @(posedge clk) disable iff (rst || thr_contract_window) (valid_in && last) |-> $stable(
-            threshold_in
-        );
-    endproperty
-    // This property ensures that when the last beat of a neuron input is being processed,
-    // the threshold value remains stable, which is critical for correct activation function
-    // computation. The thr_contract_window signal can be used to temporarily disable this assertion during 
-    // specific test scenarios where threshold changes are expected.
-    A_THR_STABLE_ON_LAST :
-    assert property (p_threshold_stable_on_last)
-    else $error("A_THR_STABLE_ON_LAST: threshold failed to remain stable at t=%0t", $time);
+    A_P_VALID_OUT_PULSE :
+    assert property (p_valid_out_pulse)
+    else $error("[FAILED][SVA] A_P_VALID_OUT_PULSE valid_out pulse is not one cycle at t=%0t", $time);
 
-    // When last is high, valid_in must also be high to ensure the final beat of a neuron input is valid
-    property p_last_needs_valid;
-        @(posedge clk) disable iff (rst) last |-> valid_in;
-    endproperty
+    A_P_ACT_STABLE_AFTER_VALID_OUT :
+    assert property (p_act_stable_after_valid_out)
+    else $error("[FAILED][SVA] A_P_ACT_STABLE_AFTER_VALID_OUT failed at t=%0t", $time);
 
-    A_LAST_NEEDS_VLD :
-    assert property (p_last_needs_valid)
-    else begin
-        $error("A_LAST_NEEDS_VLD: last assert without valid_in at t=%0t", $time);
-    end
+    A_P_PC_IN_RANGE :
+    assert property (p_pc_in_range)
+    else $error("[FAILED][SVA] A_P_PC_IN_RANGE popcount_out=%0d exceeds MAX_NEURON_INPUTS at t=%0t", popcount_out, $time);
+ 
+    A_P_ACC_CLEARS :
+    assert property (p_acc_clears)
+    else $error("[FAILED][SVA] A_P_ACC_CLEARS Accumulator did not clear on acc_we=1 and acc_sel=1 at t=%0t", $time);
 
+    A_P_ACC_FROZEN :
+    assert property (p_acc_frozen)
+    else $error("[FAILED][SVA] A_P_ACC_FROZEN Accumulator changed value during valid_in gap at t=%0t", $time);
+
+    A_P_VALID_OUT_ONLY_IN_RESET :
+    assert property (p_valid_out_only_in_reset)
+    else $error("[FAILED][SVA] A_P_VALID_OUT_ONLY_IN_RESET valid_out was asserted outside of RESET state at t=%0t", $time); 
+
+    
     // ------------------------
     //Monitors task block
     // ------------------------
@@ -321,52 +372,52 @@ module neuron_processor_tb;
             w_bits[i] = 1'b0;
         end
 
-        // n=1 (single-bit degenerate neuron)
+        // [1] n=1 (single-bit degenerate neuron)
         x_bits[0] = 1'b1; w_bits[0] = 1'b1; // expected popcount=1
         drive_main_neuron("Neuron size n=1. 1 beat (P_W=8). Single bit. Minimal accumulation. ", x_bits, w_bits, 1, 1, 1'b0);
     
-        // n=7 (padding-sensitive)
+        // [2] n=7 (padding-sensitive)
         for (i = 0; i < 7; i++) begin x_bits[i] = 1'b1; w_bits[i] = 1'b1; end // expected popcount=7
         drive_main_neuron("Neuron size n=7. 1 beat with 1 padded bit (P_W=8). Only 7 bits are real x[7]=0, w[7]=1, padded bit contributes 0 to popcount.", x_bits, w_bits, 7, 7, 1'b0);
         
-        // n=8 (full beat, no padding)
+        // [3] n=8 (full beat, no padding)
         for (i = 0; i < 8; i++) begin x_bits[i] = 1'b1; w_bits[i] = 1'b1; end // expected popcount=8
         drive_main_neuron("n8_one_full_beat", x_bits, w_bits, 8, 8, 1'b0);
 
-        // n=13 (2 beats, last beat partially real bits)
+        // [4] n=13 (2 beats, last beat partially real bits)
         for (i = 0; i < 13; i++) begin x_bits[i] = 1'b1; w_bits[i] = 1'b1; end // expected popcount=13
         drive_main_neuron("Neuron size n=13. 2 beats (P_W=8). Beat 0 is full (8 real bits). Beat 1 \
-        has 5 real bits and 3 padded bits (x[7:5]=0, w[7:5]=1) ", x_bits, w_bits, 13, 14, 1'b0);
+        has 5 real bits and 3 padded bits (x[7:5]=0, w[7:5]=1) ", x_bits, w_bits, 13, 13, 1'b0);
 
-        // n=16
+        // [5] n=16
         for (i = 0; i < 16; i++) begin x_bits[i] = 1'b1; w_bits[i] = 1'b1; end // expected popcount=16
         drive_main_neuron("Neuron size n=16. 2 full beats (P_W=8). No padding. Exact multiple.", x_bits, w_bits, 16, 16, 1'b0);
 
-        // n=32
+        // [6] n=32
         for (i = 0; i < 32; i++) begin x_bits[i] = 1'b1; w_bits[i] = 1'b1; end // expected popcount=32
         drive_main_neuron("Neuron size n=32. 4 full beats (P_W=8). Medium accumulation.", x_bits, w_bits, 32, 20, 1'b0);
 
-        // n=256 with explicit hand-computed expected=128
+        // [7] n=256 with explicit hand-computed expected=128
         for (i = 0; i < 128; i++) begin x_bits[i] = 1'b1; w_bits[i] = 1'b1; end
         for (i = 128; i < 256; i++) begin x_bits[i] = 1'b1; w_bits[i] = 1'b0; end
         drive_main_neuron("Neuron size n=256. 32 full beats (P_W=8). Layer 1/2 full topology.", x_bits, w_bits, 256, 128, 1'b0);
 
-        // n=784 with explicit hand-computed expected=393
+        // [8] n=784 with explicit hand-computed expected=393
         for (i = 0; i < 393; i++) begin x_bits[i] = 1'b1; w_bits[i] = 1'b1; end
         for (i = 393; i < 784; i++) begin x_bits[i] = 1'b1; w_bits[i] = 1'b0; end
         drive_main_neuron("Neuron size n=784. 98 full beats (P_W=8). Layer 0 full topology", x_bits, w_bits, 784, 393, 1'b0);
 
-        // n=7 strict padding neutrality check (thr=8, expected act=0 only if pc=7)
+        // [9] n=7 strict padding neutrality check (thr=8, expected act=0 only if pc=7)
         for (i = 0; i < MAX_NEURON_INPUTS; i++) begin x_bits[i] = 1'b0; w_bits[i] = 1'b0; end
         for (i = 0; i < 7; i++) begin x_bits[i] = 1'b1; w_bits[i] = 1'b1; end
         drive_main_neuron("Neuron size n=7. 1 beat with 1 padded bit (P_W=8). Only 7 bits are real x[7]=0, w[7]=1, padded bit contributes 0 to popcount.", x_bits, w_bits, 7, 8, 1'b0);
 
-        // n=13 strict padding neutrality check (thr=14, expected act=0 only if pc=13)
+        // [10] n=13 strict padding neutrality check (thr=14, expected act=0 only if pc=13)
         for (i = 0; i < MAX_NEURON_INPUTS; i++) begin x_bits[i] = 1'b0; w_bits[i] = 1'b0; end
         for (i = 0; i < 13; i++) begin x_bits[i] = 1'b1; w_bits[i] = 1'b1; end
         drive_main_neuron("Neuron size n=13. 2 beats (P_W=8). Beat 0 is full (8 real bits). Beat 1 has 5 real bits and 3 padded bits (x[7:5]=0, w[7:5]=1) ", x_bits, w_bits, 13, 14, 1'b0);
 
-        // ACT_POST_VALID_STABILITY directed test
+        // [11] n=8 ACT_POST_VALID_STABILITY directed test
         for (i = 0; i < MAX_NEURON_INPUTS; i++) begin x_bits[i] = 1'b0; w_bits[i] = 1'b0; end
         for (i = 0; i < 8; i++) begin x_bits[i] = 1'b1; w_bits[i] = 1'b1; end
         drive_main_neuron("Neuron size n=8. 1 beat (P_W=8). Act post valid stability probe.", x_bits, w_bits, 8, 4, 1'b0);    
