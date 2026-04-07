@@ -19,9 +19,9 @@ typedef enum logic [1:0] {
     IDLE,
     COMPUTE,
     RESET
-} state_t; 
+} state_t;
 
-state_t state_r, state_next; 
+state_t state_r, state_next;
 
 always_ff @(posedge clk) begin
     if (rst) begin
@@ -44,7 +44,7 @@ always_comb begin
     dbg_neuron_done  = 1'b0;
     dbg_accept_beat  = 1'b0;
 
-    unique case (state_r)
+    case (state_r)
         IDLE: begin
             if (valid_in) begin
                 // First accepted beat of a neuron.
@@ -91,7 +91,8 @@ always_comb begin
             // One-cycle clear between neurons.
             acc_we     = 1'b1;
             acc_sel    = 1'b1;
-           // activation_r_we = 1'b1;
+            // Commenting out the following line to fix the bug where activation_r_we is incorrectly asserted during RESET
+            // activation_r_we = 1'b1;
             state_next = IDLE;
         end
 

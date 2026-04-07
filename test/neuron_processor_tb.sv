@@ -1,11 +1,15 @@
 `timescale 1ns / 10ps
 
 
-module neuron_processor_tb;
+module neuron_processor_tb_rewrite_worker #(
+    parameter int P_W = 8
+) (
+    output logic done
+);
 
-    localparam int P_W = 8;
     localparam int MAX_NEURON_INPUTS = 784;
     localparam int ACC_W = $clog2(MAX_NEURON_INPUTS + 1);
+    localparam int SCOREBOARD_TIMEOUT_CYCLES = 5000;
 
     localparam logic [1:0] FSM_IDLE = 2'd0;
     localparam logic [1:0] FSM_COMPUTE = 2'd1;
@@ -284,11 +288,8 @@ module neuron_processor_tb;
     // COV-1: Per-beat popcount distribution (0 to P_W)
     covergroup cg_beat_pc @(posedge clk);
         cp_beat_pc: coverpoint dbg_beat_popcount {
-            bins pc_0 = {0};
-            bins pc_1_3 = {[1:3]};
-            bins pc_4_5 = {[4:5]};
-            bins pc_6_7 = {[6:7]};
-            bins pc_8 = {8};
+            bins pc_zero    = {0};
+            bins pc_nonzero = {[1:P_W]};
         }
         option.per_instance = 1;
     endgroup
@@ -376,7 +377,7 @@ module neuron_processor_tb;
     // COV-7: Parameter sweep (P_W bins - placeholder for multi-P_W phase)
     covergroup cg_param_sweep @(posedge clk);
         cp_p_w: coverpoint P_W {
-            bins pw_8 = {8};  // Locked to P_W=8 in this phase
+            bins pw_cur = {P_W};
         }
         option.per_instance = 1;
     endgroup
@@ -453,22 +454,41 @@ module neuron_processor_tb;
     task automatic scoreboard_main();
         exp_pkt_t exp_pkt;
         act_pkt_t act_pkt;
+        int timeout_ctr;
+        bit got_act;
         forever begin
             exp_mb.get(exp_pkt);
-            act_mb.get(act_pkt);
+            timeout_ctr = 0;
+            got_act = 1'b0;
+            while (!got_act && (timeout_ctr < SCOREBOARD_TIMEOUT_CYCLES)) begin
+                if (act_mb.try_get(act_pkt)) begin
+                    got_act = 1'b1;
+                end else begin
+                    @(posedge clk);
+                    timeout_ctr++;
+                end
+            end
+
+            if (!got_act) begin
+                total_checks++;
+                failed_checks++;
+                failed_tests.push_back($sformatf("[TEST %02d] %s", exp_pkt.id, exp_pkt.name));
+                $error("[FAILED][TIMEOUT][P_W=%0d][TEST %02d] %s check='scoreboard timed out waiting for monitor packet' timeout_cycles=%0d scope=%m time=%0t",
+                       P_W, exp_pkt.id, exp_pkt.name, SCOREBOARD_TIMEOUT_CYCLES, $time);
+                continue;
+            end
 
             total_checks++;
             if ((act_pkt.observed_popcount !== exp_pkt.expected_popcount) ||
                 (act_pkt.observed_act      !== exp_pkt.expected_act)) begin
                 failed_checks++;
                 failed_tests.push_back($sformatf("[TEST %02d] %s", exp_pkt.id, exp_pkt.name));
-                $error("[FAILED][TEST %02d] %s check='scoreboard compare popcount/act' exp(pc=%0d,act=%0b) got(pc=%0d,act=%0b) scope=%m time=%0t",
+                $error("[FAILED][P_W=%0d][TEST %02d] %s check='scoreboard compare popcount/act' exp(pc=%0d,act=%0b) got(pc=%0d,act=%0b) scope=%m time=%0t",
+                       P_W,
                        exp_pkt.id, exp_pkt.name, exp_pkt.expected_popcount, exp_pkt.expected_act,
                        act_pkt.observed_popcount, act_pkt.observed_act, act_pkt.sample_time);
             end else begin
                 passed_tests.push_back($sformatf("[TEST %02d] %s", exp_pkt.id, exp_pkt.name));
-                $display("PASS %s : pc=%0d act=%0b", exp_pkt.name, act_pkt.observed_popcount,
-                         act_pkt.observed_act);
             end
         end
     endtask
@@ -660,28 +680,31 @@ module neuron_processor_tb;
         bit x_bits[0:MAX_NEURON_INPUTS-1];
         bit w_bits[0:MAX_NEURON_INPUTS-1];
         exp_pkt_t exp_pkt;
+        int local_thr;
         int i;
         begin
             clear_vectors(x_bits, w_bits);
-            for (i = 0; i < 8; i++) begin
+            for (i = 0; i < P_W; i++) begin
                 x_bits[i] = 1'b1;
                 w_bits[i] = 1'b1;
             end
 
+            local_thr = (P_W > 1) ? (P_W / 2) : 1;
+
             exp_pkt.id                = 17;
             exp_pkt.name              = "reset asserted while FSM_RESET state active";
-            exp_pkt.expected_popcount = 8;
+            exp_pkt.expected_popcount = P_W;
             exp_pkt.expected_act      = 1'b1;
-            exp_pkt.neuron_size_bits  = 8;
+            exp_pkt.neuron_size_bits  = P_W;
             exp_pkt.expected_mode_olm = 1'b0;
             exp_mb.put(exp_pkt);
 
             @(posedge clk);
             valid_in              <= 1'b1;
             last                  <= 1'b1;
-            x_in                  <= pack_main_beat(x_bits, 8, 0, 1'b0);
-            w_in                  <= pack_main_beat(w_bits, 8, 0, 1'b1);
-            threshold_in          <= 4;
+            x_in                  <= pack_main_beat(x_bits, P_W, 0, 1'b0);
+            w_in                  <= pack_main_beat(w_bits, P_W, 0, 1'b1);
+            threshold_in          <= local_thr;
             mode_output_layer_sel <= 1'b0;
 
             @(posedge clk);
@@ -700,11 +723,9 @@ module neuron_processor_tb;
     task automatic gen_random_neuron(
         output random_neuron_t neuron,
         input int beat_count_max,
-        input bit force_olm,
-        input int thr_low,
-        input int thr_high
+        input bit force_olm
     );
-        int b, gap_len;
+        int b;
         int rand_olm_trigger, rand_btb_trigger;
         begin
             neuron.num_beats = ($urandom_range(1, beat_count_max) + P_W - 1) / P_W;
@@ -716,8 +737,8 @@ module neuron_processor_tb;
                 neuron.gap_before[b] = $urandom_range(1, 20);
             end
 
-            // Threshold strategy
-            neuron.threshold = $urandom_range(thr_low, thr_high);
+            // Threshold strategy must stay within representable logical neuron size.
+            neuron.threshold = $urandom_range(0, neuron.n_bits);
 
             // OLM: 20% forced on if force_olm=1, else 20% random
             rand_olm_trigger = $urandom_range(0, 4);
@@ -742,6 +763,7 @@ module neuron_processor_tb;
         int expected_pc;
         logic expected_act;
         logic [1:0] thr_relation;
+        logic act_at_valid;
         logic act_after_valid;
         begin
             expected_pc = calc_popcount_match(x_bits, w_bits, neuron.n_bits);
@@ -781,13 +803,14 @@ module neuron_processor_tb;
 
             // Wait for valid_out pulse
             wait (valid_out === 1'b1);
-            cov_neuron.sample(neuron.n_bits, neuron.threshold, act_out);
-            cov_thr_rel.sample(thr_relation, neuron.mode_olm, act_out);
+            act_at_valid = act_out;
+            cov_neuron.sample(neuron.n_bits, neuron.threshold, act_at_valid);
+            cov_thr_rel.sample(thr_relation, neuron.mode_olm, act_at_valid);
             cov_padding.sample(neuron.n_bits);
             cov_neuron_sizes.sample(neuron.n_bits);
             @(posedge clk);
             act_after_valid = act_out;
-            cov_act_stability.sample(expected_act, act_after_valid);
+            cov_act_stability.sample(act_at_valid, act_after_valid);
 
             // Handle BTB: if enabled, skip the normal idle cycle
             // and go straight to presenting next neuron's setup
@@ -807,11 +830,16 @@ module neuron_processor_tb;
     task automatic drive_threshold_contract_test();
         exp_pkt_t exp_pkt;
         int beat;
+        int expected_pc;
+        int final_threshold;
         begin
-            // Expected: popcount=32, act=0 because threshold on LAST beat is 40.
+            expected_pc = 4 * P_W;
+            final_threshold = expected_pc + 8;
+
+            // Generic across all P_W: 4 beats of all-ones with threshold fixed on last beat.
             exp_pkt.name              = "threshold contract: mid-neuron change, stable on last beat";
             exp_pkt.id                = 16;
-            exp_pkt.expected_popcount = 32;
+            exp_pkt.expected_popcount = expected_pc;
             exp_pkt.expected_act      = 1'b0;
             exp_mb.put(exp_pkt);
 
@@ -819,16 +847,16 @@ module neuron_processor_tb;
                 @(posedge clk);
                 valid_in <= 1'b1;
                 last <= (beat == 3);
-                x_in <= 8'hFF;
-                w_in <= 8'hFF;
+                x_in <= {P_W{1'b1}};
+                w_in <= {P_W{1'b1}};
                 mode_output_layer_sel <= 1'b0;
 
                 // Mid-neuron threshold change, then stabilize before last beat.
                 // This keeps Section 1 functional-only while still exercising
                 // non-last threshold movement.
                 if (beat == 1)      threshold_in <= 1;
-                else if (beat == 2) threshold_in <= 40;
-                else                threshold_in <= 40;
+                else if (beat == 2) threshold_in <= final_threshold;
+                else                threshold_in <= final_threshold;
             end
 
             @(posedge clk);
@@ -978,9 +1006,18 @@ module neuron_processor_tb;
         clear_vectors(x_bits, w_bits);
         for (i = 0; i < 32; i++) begin x_bits[i] = 1'b1; w_bits[i] = 1'b1; end
         drive_main_neuron(15, "OLM suppresses activation output", x_bits, w_bits, 32, 0, 1'b1);
+        drive_threshold_contract_test();
         drive_reset_from_compute();
         drive_reset_from_reset_state();
-        
+
+        // [11b] n=784 high-threshold-band coverage point
+        clear_vectors(x_bits, w_bits);
+        for (i = 0; i < 784; i++) begin
+            x_bits[i] = 1'b1;
+            w_bits[i] = 1'b1;
+        end
+        drive_main_neuron(18, "Neuron size n=784 high threshold band coverage", x_bits, w_bits, 784, 500, 1'b0);
+
         // wait (valid_out == 1'b1);
         // @(posedge clk);
         // act_at_valid = act_out;
@@ -992,12 +1029,12 @@ module neuron_processor_tb;
         //     $error("[FAILED] act_out changed after valid_out fell (act@valid=%0b, act@after=%0b)",
         //            act_at_valid, act_after_valid);
         // end
-
-        drive_threshold_contract_test();
     endtask
 
     
-
+    //---------------------------------------
+    // Randomized stress tests tasks 
+    //---------------------------------------
     task automatic run_r1_core_stress();
         int nrn, beat_count_max;
         random_neuron_t neuron;
@@ -1008,7 +1045,7 @@ module neuron_processor_tb;
         begin
             beat_count_max = 98;  // Up to 98 beats
             for (nrn = 0; nrn < 300; nrn++) begin
-                gen_random_neuron(neuron, beat_count_max, 1'b0, 0, neuron.n_bits * P_W);
+                gen_random_neuron(neuron, beat_count_max, 1'b0);
 
                 // Randomize x/w bits
                 for (bi = 0; bi < neuron.n_bits; bi++) begin
@@ -1018,7 +1055,7 @@ module neuron_processor_tb;
                     w_bits[bi] = rand_w[0];
                 end
 
-                test_name = $sformatf("R68[%03d] core stress n=%0d beats=%0d olm=%0b btb=%0b",
+                test_name = $sformatf("R1[%03d] core stress n=%0d beats=%0d olm=%0b btb=%0b",
                     nrn, neuron.n_bits, neuron.num_beats, neuron.mode_olm, neuron.back_to_back);
                 drive_random_neuron(1000 + nrn, test_name, neuron, x_bits, w_bits);
                 random_tests_run++;
@@ -1035,7 +1072,7 @@ module neuron_processor_tb;
         begin
             beat_count_max = 98;
             for (nrn = 0; nrn < 100; nrn++) begin
-                gen_random_neuron(neuron, beat_count_max, 1'b0, 0, neuron.n_bits * P_W);
+                gen_random_neuron(neuron, beat_count_max, 1'b0);
                 // Gaps are already [1,20] from gen_random_neuron, heavy by design
 
                 for (bi = 0; bi < neuron.n_bits; bi++) begin
@@ -1045,7 +1082,7 @@ module neuron_processor_tb;
                     w_bits[bi] = rand_w[0];
                 end
 
-                test_name = $sformatf("R69[%03d] heavy gap n=%0d beats=%0d gap_min=1",
+                test_name = $sformatf("R2[%03d] heavy gap n=%0d beats=%0d gap_min=1",
                     nrn, neuron.n_bits, neuron.num_beats);
                 drive_random_neuron(1300 + nrn, test_name, neuron, x_bits, w_bits);
                 random_tests_run++;
@@ -1064,7 +1101,7 @@ module neuron_processor_tb;
         begin
             beat_count_max = 98;
             for (nrn = 0; nrn < 150; nrn++) begin
-                gen_random_neuron(neuron, beat_count_max, 1'b0, 0, neuron.n_bits * P_W);
+                gen_random_neuron(neuron, beat_count_max, 1'b0);
 
                 for (bi = 0; bi < neuron.n_bits; bi++) begin
                     rand_x = $urandom();
@@ -1080,8 +1117,9 @@ module neuron_processor_tb;
                 if (neuron.threshold < 0) neuron.threshold = 0;
                 if (neuron.threshold > neuron.n_bits) neuron.threshold = neuron.n_bits;
 
-                test_name = $sformatf("R70[%03d] boundary pc=%0d thr=%0d offset=%0d",
+                test_name = $sformatf("R3[%03d] boundary pc=%0d thr=%0d offset=%0d",
                     nrn, pc, neuron.threshold, thr_offset);
+                drive_random_neuron(1400 + nrn, test_name, neuron, x_bits, w_bits);
                 random_tests_run++;
             end
         end
@@ -1097,7 +1135,7 @@ module neuron_processor_tb;
         begin
             beat_count_max = 98;
             for (nrn = 0; nrn < 75; nrn++) begin
-                gen_random_neuron(neuron, beat_count_max, 1'b1, 0, neuron.n_bits * P_W);  // force_olm=1
+                gen_random_neuron(neuron, beat_count_max, 1'b1);  // force_olm=1
                 neuron.mode_olm = 1'b1;  // Explicitly OLM always
 
                 for (bi = 0; bi < neuron.n_bits; bi++) begin
@@ -1107,7 +1145,7 @@ module neuron_processor_tb;
                     w_bits[bi] = rand_w[0];
                 end
 
-                test_name = $sformatf("R71[%03d] OLM saturation n=%0d beats=%0d olm_forced",
+                test_name = $sformatf("R4[%03d] OLM saturation n=%0d beats=%0d olm_forced",
                     nrn, neuron.n_bits, neuron.num_beats);
                 drive_random_neuron(1550 + nrn, test_name, neuron, x_bits, w_bits);
                 random_tests_run++;
@@ -1123,7 +1161,7 @@ module neuron_processor_tb;
         string test_name;
         begin
             for (nrn = 0; nrn < 75; nrn++) begin
-                gen_random_neuron(neuron, 1, 1'b0, 0, 1);
+                gen_random_neuron(neuron, 1, 1'b0);
                 neuron.num_beats = 1;
                 neuron.n_bits = 1;
                 for (idx = 0; idx < MAX_NEURON_INPUTS; idx++) begin
@@ -1134,7 +1172,7 @@ module neuron_processor_tb;
                 x_bits[0] = rand_val[0];
                 rand_val = $urandom();
                 w_bits[0] = rand_val[0];
-                test_name = $sformatf("R72[%03d] single-beat n=1 olm=%0b", nrn, neuron.mode_olm);
+                test_name = $sformatf("R5[%03d] single-beat n=1 olm=%0b", nrn, neuron.mode_olm);
                 drive_random_neuron(1625 + nrn, test_name, neuron, x_bits, w_bits);
                 random_tests_run++;
             end
@@ -1147,6 +1185,7 @@ module neuron_processor_tb;
     initial begin
         int k;
 
+        done = 1'b0;
         exp_mb = new();
         act_mb = new();
         
@@ -1192,14 +1231,12 @@ module neuron_processor_tb;
 
 
         $display("-----------------------------------------------");
-        $display("--------------SUMMARY SCOREBOARD--------------");
-        $display("[SUMMARY]total_testcases=%0d passed=%0d failed=%0d", total_checks, passed_tests.size(), failed_tests.size());
+        $display("------ SCOREBOARD SUMMARY (P_W=%0d) ------", P_W);
+        $display("[SUMMARY][P_W=%0d] total_testcases=%0d passed=%0d failed=%0d", P_W, total_checks, passed_tests.size(), failed_tests.size());
         $display("-----------------------------------------------");
         
-        
-        
         if (passed_tests.size() > 0) begin
-            $display("[SUMMARY][PASSED_TESTS] (Directed subset shown)");
+            $display("[SUMMARY][P_W=%0d][PASSED_TESTS] (Directed subset shown)", P_W);
             for (k = 0; k < (passed_tests.size() < 20 ? passed_tests.size() : 20); k++) begin
                 $display("  %s", passed_tests[k]);
             end
@@ -1207,15 +1244,18 @@ module neuron_processor_tb;
                 $display("  ... and %0d more", passed_tests.size() - 20);
             end
         end
+
+        
+        
         if (failed_tests.size() > 0) begin
-            $display("[SUMMARY][FAILED_TESTS]");
+            $display("[SUMMARY][P_W=%0d][FAILED_TESTS]", P_W);
             for (k = 0; k < failed_tests.size(); k++) begin
                 $display("  %s", failed_tests[k]);
             end
         end
 
-        $display("[SUMMARY][SVA] unexpected_assert_fails=%0d", unexpected_assert_fails);
-        $display("[SUMMARY][RANDOM_TESTS] run=%0d failed=%0d", random_tests_run, random_tests_failed);
+        $display("[SUMMARY][P_W=%0d][SVA] unexpected_assert_fails=%0d", P_W, unexpected_assert_fails);
+        $display("[SUMMARY][P_W=%0d][RANDOM_TESTS] run=%0d failed=%0d", P_W, random_tests_run, random_tests_failed);
 
         // --------- Coverage Report ---------
         $display("-----------------------------------------------");
@@ -1241,8 +1281,53 @@ module neuron_processor_tb;
             $fatal(1, "TESTBENCH FAIL");
         end
 
-        $finish;
+        done = 1'b1;
     end
 
+
+endmodule
+
+// Top-level testbench module that instantiates multiple workers for different P_W values
+module neuron_processor_tb_rewrite;
+
+    logic done_pw1;
+    logic done_pw2;
+    logic done_pw4;
+    logic done_pw8;
+    logic done_pw16;
+
+    genvar gi;
+    generate
+        for (gi = 0; gi < 5; gi++) begin : GEN_PW_SWEEP
+            if (gi == 0) begin : DUT_PW_1
+                neuron_processor_tb_rewrite_worker #(.P_W(1)) u_tb_pw1 (.done(done_pw1));
+            end
+            if (gi == 1) begin : DUT_PW_2
+                neuron_processor_tb_rewrite_worker #(.P_W(2)) u_tb_pw2 (.done(done_pw2));
+            end
+            if (gi == 2) begin : DUT_PW_4
+                neuron_processor_tb_rewrite_worker #(.P_W(4)) u_tb_pw4 (.done(done_pw4));
+            end
+            if (gi == 3) begin : DUT_PW_8
+                neuron_processor_tb_rewrite_worker #(.P_W(8)) u_tb_pw8 (.done(done_pw8));
+            end
+            if (gi == 4) begin : DUT_PW_16
+                neuron_processor_tb_rewrite_worker #(.P_W(16)) u_tb_pw16 (.done(done_pw16));
+            end
+        end
+    endgenerate
+
+    initial begin
+        fork
+            begin wait (done_pw1);  $display("[TOP] DUT_PW_1 complete");  end
+            begin wait (done_pw2);  $display("[TOP] DUT_PW_2 complete");  end
+            begin wait (done_pw4);  $display("[TOP] DUT_PW_4 complete");  end
+            begin wait (done_pw8);  $display("[TOP] DUT_PW_8 complete");  end
+            begin wait (done_pw16); $display("[TOP] DUT_PW_16 complete"); end
+        join
+
+        $display("[TOP] All concurrent P_W workers completed");
+        $finish;
+    end
 
 endmodule

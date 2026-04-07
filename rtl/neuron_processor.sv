@@ -33,7 +33,7 @@ module neuron_processor #(
     logic valid_out_we;
     logic dbg_threshold_pass_tap;
 
-    NP_fsm u_fsm(
+    NP_fsm u_fsm (
         .clk             (clk),
         .rst             (rst),
         .valid_in        (valid_in),
@@ -71,10 +71,5 @@ module neuron_processor #(
         .dbg_acc              (dbg_accum),
         .dbg_threshold_pass   (dbg_threshold_pass_tap)
     );
-
-    // Keep debug net connected for bring-up visibility without affecting behavior.
-    always_comb begin
-        if (1'b0) $display("dbg_threshold_pass_tap=%0b", dbg_threshold_pass_tap);
-    end
 
 endmodule
