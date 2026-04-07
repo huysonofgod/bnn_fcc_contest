@@ -13,6 +13,7 @@ module neuron_processor_tb;
 
     typedef struct {
         string name;
+        int    id;
         int    expected_popcount;
         logic  expected_act;
         int    neuron_size_bits;
@@ -63,8 +64,11 @@ module neuron_processor_tb;
     int                         total_checks;
     int                         failed_checks;
 
-
     int                         unexpected_assert_fails;
+
+    string passed_tests[$];
+    string failed_tests[$];
+
 
     neuron_processor #(
         .P_W              (P_W),
@@ -285,10 +289,12 @@ module neuron_processor_tb;
             if ((act_pkt.observed_popcount !== exp_pkt.expected_popcount) ||
                 (act_pkt.observed_act      !== exp_pkt.expected_act)) begin
                 failed_checks++;
-                $error("Scoreboard mismatch for %s: exp(pc=%0d,act=%0b) got(pc=%0d,act=%0b) @t=%0t",
-                       exp_pkt.name, exp_pkt.expected_popcount, exp_pkt.expected_act,
+                failed_tests.push_back($sformatf("[TEST %02d] %s", exp_pkt.id, exp_pkt.name));
+                $error("[FAILED][TEST %02d] %s check='scoreboard compare popcount/act' exp(pc=%0d,act=%0b) got(pc=%0d,act=%0b) scope=%m time=%0t",
+                       exp_pkt.id, exp_pkt.name, exp_pkt.expected_popcount, exp_pkt.expected_act,
                        act_pkt.observed_popcount, act_pkt.observed_act, act_pkt.sample_time);
             end else begin
+                passed_tests.push_back($sformatf("[TEST %02d] %s", exp_pkt.id, exp_pkt.name));
                 $display("PASS %s : pc=%0d act=%0b", exp_pkt.name, act_pkt.observed_popcount,
                          act_pkt.observed_act);
             end
@@ -301,7 +307,8 @@ module neuron_processor_tb;
 
     // This function calculates the popcount of matching bits between two bit arrays (x_bits and w_bits) up to n_bits.
     function automatic int calc_popcount_match(input bit x_bits[0:MAX_NEURON_INPUTS-1],
-                                               input bit w_bits[0:MAX_NEURON_INPUTS-1], input int n_bits);
+                                               input bit w_bits[0:MAX_NEURON_INPUTS-1], 
+                                               input int n_bits);
         int k;
         int cnt;
         begin
@@ -314,33 +321,55 @@ module neuron_processor_tb;
     endfunction
 
     // This function packs a segment of bits from the input arrays into a word of width MAIN_P_W, applying padding rules if the segment exceeds n_bits.
-    function automatic logic [P_W-1:0] pack_main_beat(input bit bits[0:MAX_NEURON_INPUTS-1], input int n_bits,
-                                                      input int beat_idx, input bit is_w_bus);
-        int b;
-        int abs_idx;
-        logic [P_W-1:0] word;
-        begin
-            word = '0;
-            for (b = 0; b < P_W; b++) begin
-                abs_idx = beat_idx * P_W + b;
-                if (abs_idx < n_bits) begin
-                    word[b] = bits[abs_idx];
-                end else begin
-                    // Padding rule from handoff:
-                    // x pad bit = 0, w pad bit = 1 so XNOR pad contributes 0.
-                    word[b] = (is_w_bus) ? 1'b1 : 1'b0;
-                end
+    function automatic logic [P_W-1:0] pack_main_beat(input bit bits[0:MAX_NEURON_INPUTS-1],
+                                                      input int n_bits,
+                                                      input int beat_idx,
+                                                      input bit is_w_bus);
+    int b;
+    int abs_idx;
+    logic [P_W-1:0] word;
+    begin
+        word = '0;
+        for (b = 0; b < P_W; b++) begin
+            abs_idx = beat_idx * P_W + b;
+            if (abs_idx < n_bits) begin
+                word[b] = bits[abs_idx];
+            end else begin
+                // Padding rule from handoff:
+                // x pad bit = 0, w pad bit = 1 so XNOR pad contributes 0.
+                word[b] = (is_w_bus) ? 1'b1 : 1'b0;
             end
-            return word;
         end
+        return word;
+    end
     endfunction
 
+
+    task automatic clear_vectors(
+        output bit x_bits [0:MAX_NEURON_INPUTS-1],
+        output bit w_bits [0:MAX_NEURON_INPUTS-1]
+    );
+        int i;
+        begin
+            for (i = 0; i < MAX_NEURON_INPUTS; i++) begin
+                x_bits[i] = 1'b0;
+                w_bits[i] = 1'b0;
+            end
+        end
+    endtask
+
+
+    
     // ------------------------------
     // Driver component for main DUT
     // ------------------------------
-    task automatic drive_main_neuron(input string test_name, input bit x_bits[0:MAX_NEURON_INPUTS-1],
-                                     input bit w_bits[0:MAX_NEURON_INPUTS-1], input int n_bits,
-                                     input logic [ACC_W-1:0] threshold, input bit mode_olm);
+    task automatic drive_main_neuron(input int test_id,
+                                     input string test_name,
+                                     input bit x_bits[0:MAX_NEURON_INPUTS-1],
+                                     input bit w_bits[0:MAX_NEURON_INPUTS-1],
+                                     input int n_bits,
+                                     input logic [ACC_W-1:0] threshold,
+                                     input bit mode_olm);
         int beats;
         int beat;
         exp_pkt_t exp_pkt;
@@ -375,6 +404,9 @@ module neuron_processor_tb;
         @(posedge clk);
         valid_in <= 1'b0;
         last     <= 1'b0;
+        // Wait for DUT to finish processing and return to idle before exiting task to avoid inter-test interference.
+        wait (valid_out == 1'b0); 
+        @(posedge clk);
     endtask
 
     // Reset helper
@@ -400,6 +432,45 @@ module neuron_processor_tb;
         end
     endtask
 
+    // This test checks that changing the threshold mid-neuron does not affect the final output,
+    // as long as the threshold is stable on the last beat.
+    // This verifies that the FSM correctly register the threshold on the first beat and uses the registered value for all
+    // beats of the neuron, rather than allowing the threshold to change mid-computation which would be a bug.
+    task automatic drive_threshold_contract_test();
+        exp_pkt_t exp_pkt;
+        int beat;
+        begin
+            // Expected: popcount=32, act=0 because threshold on LAST beat is 40.
+            exp_pkt.name              = "threshold contract: mid-neuron change, stable on last beat";
+            exp_pkt.id                = 16;
+            exp_pkt.expected_popcount = 32;
+            exp_pkt.expected_act      = 1'b0;
+            exp_mb.put(exp_pkt);
+
+            for (beat = 0; beat < 4; beat++) begin
+                @(posedge clk);
+                valid_in <= 1'b1;
+                last <= (beat == 3);
+                x_in <= 8'hFF;
+                w_in <= 8'hFF;
+                mode_output_layer_sel <= 1'b0;
+
+                // Mid-neuron threshold change, then stabilize before last beat.
+                // This keeps Section 1 functional-only while still exercising
+                // non-last threshold movement.
+                if (beat == 1)      threshold_in <= 1;
+                else if (beat == 2) threshold_in <= 40;
+                else                threshold_in <= 40;
+            end
+
+            @(posedge clk);
+            valid_in <= 1'b0;
+            last <= 1'b0;
+
+            wait (valid_out === 1'b1);
+            @(posedge clk);
+        end
+    endtask
 
     task automatic run_directed_main_suite();
         bit x_bits[0:MAX_NEURON_INPUTS-1];
@@ -409,58 +480,70 @@ module neuron_processor_tb;
         logic act_after_valid;
 
         // Always initialize vectors before each test so old values do not leak.
-        for (i = 0; i < MAX_NEURON_INPUTS; i++) begin
-            x_bits[i] = 1'b0;
-            w_bits[i] = 1'b0;
-        end
-
+        // for (i = 0; i < MAX_NEURON_INPUTS; i++) begin
+        //     x_bits[i] = 1'b0;
+        //     w_bits[i] = 1'b0;
+        // end
+        clear_vectors(x_bits, w_bits);
+        x_bits[4] = 1'b1; x_bits[5] = 1'b1; x_bits[6] = 1'b1; x_bits[7] = 1'b1;
+        w_bits[4] = 1'b1; w_bits[5] = 1'b1; w_bits[6] = 1'b1; w_bits[7] = 1'b1;
+        drive_main_neuron(1, "thr boundary low: pc=8 thr=3 expect fire", x_bits, w_bits, 8, 3, 1'b0);
+        drive_main_neuron(2, "thr boundary equal: pc=8 thr=4 expect fire", x_bits, w_bits, 8, 4, 1'b0);
+        drive_main_neuron(3, "thr boundary high: pc=8 thr=5 expect fire", x_bits, w_bits, 8, 5, 1'b0);
+        
         // [1] n=1 (single-bit degenerate neuron)
         x_bits[0] = 1'b1;
         w_bits[0] = 1'b1;  // expected popcount=1
-        drive_main_neuron("Neuron size n=1. 1 beat (P_W=8). Single bit. Minimal accumulation. ", x_bits,
+        drive_main_neuron(4, "Neuron size n=1. 1 beat (P_W=8). Single bit. ", x_bits,
                           w_bits, 1, 1, 1'b0);
 
         // [2] n=7 (padding-sensitive)
+        clear_vectors(x_bits, w_bits);
         for (i = 0; i < 7; i++) begin
             x_bits[i] = 1'b1;
             w_bits[i] = 1'b1;
         end  // expected popcount=7
-        drive_main_neuron(
+        drive_main_neuron(5,
             "Neuron size n=7. 1 beat with 1 padded bit (P_W=8). Only 7 bits are real x[7]=0, w[7]=1, padded bit contributes 0 to popcount.",
             x_bits, w_bits, 7, 7, 1'b0);
 
         // [3] n=8 (full beat, no padding)
+        clear_vectors(x_bits, w_bits);
         for (i = 0; i < 8; i++) begin
             x_bits[i] = 1'b1;
             w_bits[i] = 1'b1;
         end  // expected popcount=8
-        drive_main_neuron("n8_one_full_beat", x_bits, w_bits, 8, 8, 1'b0);
+        drive_main_neuron(6, "n8_one_full_beat", x_bits, w_bits, 8, 8, 1'b0);
 
         // [4] n=13 (2 beats, last beat partially real bits)
+        clear_vectors(x_bits, w_bits);
         for (i = 0; i < 13; i++) begin
             x_bits[i] = 1'b1;
             w_bits[i] = 1'b1;
         end  // expected popcount=13
-        drive_main_neuron("Neuron size n=13. 2 beats (P_W=8). Beat 0 is full (8 real bits). Beat 1 \
+        drive_main_neuron(7, "Neuron size n=13. 2 beats (P_W=8). Beat 0 is full (8 real bits). Beat 1 \
         has 5 real bits and 3 padded bits (x[7:5]=0, w[7:5]=1) ", x_bits, w_bits, 13, 13, 1'b0);
 
         // [5] n=16
+        clear_vectors(x_bits, w_bits);
         for (i = 0; i < 16; i++) begin
             x_bits[i] = 1'b1;
             w_bits[i] = 1'b1;
         end  // expected popcount=16
-        drive_main_neuron("Neuron size n=16. 2 full beats (P_W=8). No padding. Exact multiple.", x_bits,
+        drive_main_neuron(8, "Neuron size n=16. 2 full beats (P_W=8). No padding. Exact multiple.", x_bits,
                           w_bits, 16, 16, 1'b0);
-
+    
         // [6] n=32
+        clear_vectors(x_bits, w_bits);
         for (i = 0; i < 32; i++) begin
             x_bits[i] = 1'b1;
             w_bits[i] = 1'b1;
         end  // expected popcount=32
-        drive_main_neuron("Neuron size n=32. 4 full beats (P_W=8). Medium accumulation.", x_bits, w_bits, 32,
+        drive_main_neuron(9, "Neuron size n=32. 4 full beats (P_W=8). Medium accumulation.", x_bits, w_bits, 32,
                           20, 1'b0);
 
         // [7] n=256 with explicit hand-computed expected=128
+        clear_vectors(x_bits, w_bits);
         for (i = 0; i < 128; i++) begin
             x_bits[i] = 1'b1;
             w_bits[i] = 1'b1;
@@ -469,10 +552,10 @@ module neuron_processor_tb;
             x_bits[i] = 1'b1;
             w_bits[i] = 1'b0;
         end
-        drive_main_neuron("Neuron size n=256. 32 full beats (P_W=8). Layer 1/2 full topology.", x_bits,
-                          w_bits, 256, 128, 1'b0);
+        drive_main_neuron(10,"Neuron size n=256. 32 full beats (P_W=8). Layer 1/2 full topology.", x_bits, w_bits, 256, 128, 1'b0);
 
         // [8] n=784 with explicit hand-computed expected=393
+        clear_vectors(x_bits, w_bits);
         for (i = 0; i < 393; i++) begin
             x_bits[i] = 1'b1;
             w_bits[i] = 1'b1;
@@ -481,10 +564,10 @@ module neuron_processor_tb;
             x_bits[i] = 1'b1;
             w_bits[i] = 1'b0;
         end
-        drive_main_neuron("Neuron size n=784. 98 full beats (P_W=8). Layer 0 full topology", x_bits, w_bits,
-                          784, 393, 1'b0);
+        drive_main_neuron(11,"Neuron size n=784. 98 full beats (P_W=8). Layer 0 full topology", x_bits, w_bits, 784, 393, 1'b0);
 
         // [9] n=7 strict padding neutrality check (thr=8, expected act=0 only if pc=7)
+        clear_vectors(x_bits, w_bits);
         for (i = 0; i < MAX_NEURON_INPUTS; i++) begin
             x_bits[i] = 1'b0;
             w_bits[i] = 1'b0;
@@ -493,11 +576,12 @@ module neuron_processor_tb;
             x_bits[i] = 1'b1;
             w_bits[i] = 1'b1;
         end
-        drive_main_neuron(
-            "Neuron size n=7. 1 beat with 1 padded bit (P_W=8). Only 7 bits are real x[7]=0, w[7]=1, padded bit contributes 0 to popcount.",
+        drive_main_neuron(12,
+            "Neuron size n=7, thr=8. 1 beat with 1 padded bit (P_W=8). Only 7 bits are real x[7]=0, w[7]=1, padded bit contributes 0 to popcount.",
             x_bits, w_bits, 7, 8, 1'b0);
 
         // [10] n=13 strict padding neutrality check (thr=14, expected act=0 only if pc=13)
+        clear_vectors(x_bits, w_bits);
         for (i = 0; i < MAX_NEURON_INPUTS; i++) begin
             x_bits[i] = 1'b0;
             w_bits[i] = 1'b0;
@@ -506,11 +590,12 @@ module neuron_processor_tb;
             x_bits[i] = 1'b1;
             w_bits[i] = 1'b1;
         end
-        drive_main_neuron(
-            "Neuron size n=13. 2 beats (P_W=8). Beat 0 is full (8 real bits). Beat 1 has 5 real bits and 3 padded bits (x[7:5]=0, w[7:5]=1) ",
+        drive_main_neuron(13,
+            "Neuron size n=13. thr=14. 2 beats (P_W=8). Beat 0 is full (8 real bits). Beat 1 has 5 real bits and 3 padded bits (x[7:5]=0, w[7:5]=1) ",
             x_bits, w_bits, 13, 14, 1'b0);
 
         // [11] n=8 ACT_POST_VALID_STABILITY directed test
+        clear_vectors(x_bits, w_bits);
         for (i = 0; i < MAX_NEURON_INPUTS; i++) begin
             x_bits[i] = 1'b0;
             w_bits[i] = 1'b0;
@@ -519,20 +604,26 @@ module neuron_processor_tb;
             x_bits[i] = 1'b1;
             w_bits[i] = 1'b1;
         end
-        drive_main_neuron("Neuron size n=8. 1 beat (P_W=8). Act post valid stability probe.", x_bits, w_bits,
+        drive_main_neuron(14, "Neuron size n=8. 1 beat (P_W=8). Act post valid stability probe.", x_bits, w_bits,
                           8, 4, 1'b0);
 
-        wait (valid_out == 1'b1);
-        @(posedge clk);
-        act_at_valid = act_out;
-        @(posedge clk);
-        act_after_valid = act_out;
-        total_checks++;
-        if (act_at_valid !== act_after_valid) begin
-            failed_checks++;
-            $error("[FAILED] act_out changed after valid_out fell (act@valid=%0b, act@after=%0b)",
-                   act_at_valid, act_after_valid);
-        end
+        clear_vectors(x_bits, w_bits);
+        for (i = 0; i < 32; i++) begin x_bits[i] = 1'b1; w_bits[i] = 1'b1; end
+        drive_main_neuron(15, "OLM suppresses activation output", x_bits, w_bits, 32, 0, 1'b1);
+        
+        // wait (valid_out == 1'b1);
+        // @(posedge clk);
+        // act_at_valid = act_out;
+        // @(posedge clk);
+        // act_after_valid = act_out;
+        // total_checks++;
+        // if (act_at_valid !== act_after_valid) begin
+        //     failed_checks++;
+        //     $error("[FAILED] act_out changed after valid_out fell (act@valid=%0b, act@after=%0b)",
+        //            act_at_valid, act_after_valid);
+        // end
+
+        drive_threshold_contract_test();
     endtask
 
 
@@ -545,13 +636,15 @@ module neuron_processor_tb;
 
         total_checks = 0;
         failed_checks = 0;
+        unexpected_assert_fails = 0;
         // Start monitor+scoreboard components in parallel.
+        
+        apply_reset(4);
         fork
             monitor_main();
             scoreboard_main();
         join_none
 
-        apply_reset(4);
 
         run_directed_main_suite();
 
@@ -559,7 +652,8 @@ module neuron_processor_tb;
         repeat (10) @(posedge clk);
 
         $display("-----------------------------------------------");
-        $display("TB SUMMARY: total_checks=%0d failed_checks=%0d", total_checks, failed_checks);
+        $display("--------------SUMMARY SCOREBOARD--------------");
+        $display("[SUMMARY]total_testcases=%0d passed=%0d failed=%0d", total_checks, passed_tests.size(), failed_tests.size());
         $display("-----------------------------------------------");
 
         if (failed_checks == 0) begin

@@ -19,9 +19,9 @@ typedef enum logic [1:0] {
     IDLE,
     COMPUTE,
     RESET
-} state_t;
+} state_t; 
 
-state_t state_r, state_next;
+state_t state_r, state_next; 
 
 always_ff @(posedge clk) begin
     if (rst) begin
