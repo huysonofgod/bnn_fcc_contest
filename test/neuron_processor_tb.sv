@@ -26,6 +26,14 @@ module neuron_processor_tb;
         time  sample_time;
     } act_pkt_t;
 
+    typedef struct {
+        int n_bits;
+        int num_beats;
+        int gap_before[];
+        int threshold;
+        bit mode_olm;
+        bit back_to_back;
+    } random_neuron_t;
     mailbox                     exp_mb;
     mailbox                     act_mb;
 
@@ -68,6 +76,13 @@ module neuron_processor_tb;
 
     string passed_tests[$];
     string failed_tests[$];
+
+    
+    // Random test tracking 
+    int random_tests_run;
+    int random_tests_failed;
+    string random_passed_tests[$];
+    string random_failed_tests[$];
 
 
     neuron_processor #(
@@ -259,6 +274,153 @@ module neuron_processor_tb;
         unexpected_assert_fails++;
         $error("[FAILED][SVA] A_THR_STABLE_ON_LAST check='threshold stable on final beat' scope=%m time=%0t", $time);
     end
+
+    // ------------------------
+    // Formal coverage group
+    // ------------------------
+
+
+    // -------------------------------------------------------------------------
+    // COV-1: Per-beat popcount distribution (0 to P_W)
+    covergroup cg_beat_pc @(posedge clk);
+        cp_beat_pc: coverpoint dbg_beat_popcount {
+            bins pc_0 = {0};
+            bins pc_1_3 = {[1:3]};
+            bins pc_4_5 = {[4:5]};
+            bins pc_6_7 = {[6:7]};
+            bins pc_8 = {8};
+        }
+        option.per_instance = 1;
+    endgroup
+
+    // COV-2: Protocol transitions (valid gaps, single-beat, reset, OLM, valid_out)
+    covergroup cg_protocol @(posedge clk);
+        cp_valid_in_state: coverpoint {valid_in, dut.u_fsm.state_r} {
+            bins valid_in_idle  = {{1'b1, FSM_IDLE}};
+            bins valid_in_compute = {{1'b1, FSM_COMPUTE}};
+            bins idle_idle      = {{1'b0, FSM_IDLE}};
+            bins idle_compute   = {{1'b0, FSM_COMPUTE}};
+        }
+        cp_valid_out: coverpoint valid_out {
+            bins valid_out_pulse = {1};
+            bins valid_out_low   = {0};
+        }
+        cp_olm_sample: coverpoint mode_output_layer_sel {
+            bins olm_on  = {1};
+            bins olm_off = {0};
+        }
+        option.per_instance = 1;
+    endgroup
+
+    // COV-3: Neuron characteristics (beat count, threshold, activation result, OLM, BTB, gaps)
+    covergroup cg_neuron @(posedge clk);
+        cp_neuron_size: coverpoint {1, 7, 8, 13, 16, 32, 256, 784};
+        cp_threshold_bin: coverpoint threshold_in {
+            bins thr_low    = {[0:100]};
+            bins thr_mid    = {[101:400]};
+            bins thr_high   = {[401:784]};
+        }
+        cp_act_result: coverpoint act_out {
+            bins act_0 = {0};
+            bins act_1 = {1};
+        }
+        option.per_instance = 1;
+    endgroup
+
+    // COV-4: Threshold relationship cross (below/equal/above popcount, vs OLM)
+    covergroup cg_thr_rel @(posedge clk);
+        cp_thr_below_above: coverpoint {popcount_out, threshold_in} {
+            bins below = default;
+            bins equal = default;
+            bins above = default;
+        }
+        cp_olm_impact: coverpoint {mode_output_layer_sel, act_out} {
+            bins olm_forces_0 = {{1'b1, 1'b0}};
+            bins no_olm_result = {{1'b0, 1'b?}};
+        }
+        option.per_instance = 1;
+    endgroup
+
+    // COV-5: FSM transitions (all legal arcs)
+    covergroup cg_fsm_trans @(posedge clk);
+        cp_fsm_transitions: coverpoint {dut.u_fsm.state_r, dut.u_fsm.state_next} {
+            bins idle_to_compute = {{FSM_IDLE, FSM_COMPUTE}};
+            bins idle_to_idle    = {{FSM_IDLE, FSM_IDLE}};
+            bins compute_to_compute = {{FSM_COMPUTE, FSM_COMPUTE}};
+            bins compute_to_reset = {{FSM_COMPUTE, FSM_RESET}};
+            bins idle_to_reset   = {{FSM_IDLE, FSM_RESET}};
+            bins reset_to_idle   = {{FSM_RESET, FSM_IDLE}};
+        }
+        option.per_instance = 1;
+    endgroup
+
+    // COV-6: Reset insertion point in FSM (from each state)
+    covergroup cg_rst_in_state @(posedge clk);
+        cp_rst_from_state: coverpoint {rst, dut.u_fsm.state_r} {
+            bins rst_from_idle    = {{1'b1, FSM_IDLE}};
+            bins rst_from_compute = {{1'b1, FSM_COMPUTE}};
+            bins rst_from_reset   = {{1'b1, FSM_RESET}};
+        }
+        option.per_instance = 1;
+    endgroup
+
+    // COV-7: Parameter sweep (P_W bins - placeholder for multi-P_W phase)
+    covergroup cg_param_sweep @(posedge clk);
+        cp_p_w: coverpoint P_W {
+            bins pw_8 = {8};  // Locked to P_W=8 in this phase
+        }
+        option.per_instance = 1;
+    endgroup
+
+    // COV-8: Padding scenarios (n=7, n=13, n=other)
+    covergroup cg_padding @(posedge clk);
+        cp_padded_sizes: coverpoint {1, 7, 8, 13, 16, 32, 256, 784} {
+            bins n_7_padded   = {7};
+            bins n_13_padded  = {13};
+            bins n_other      = default;
+        }
+        option.per_instance = 1;
+    endgroup
+
+    // COV-9: Mandatory neuron sizes from spec
+    covergroup cg_neuron_sizes @(posedge clk);
+        cp_mandatory_n: coverpoint {1, 7, 8, 13, 16, 32, 256, 784} {
+            bins n_1   = {1};
+            bins n_7   = {7};
+            bins n_8   = {8};
+            bins n_13  = {13};
+            bins n_16  = {16};
+            bins n_32  = {32};
+            bins n_256 = {256};
+            bins n_784 = {784};
+        }
+        option.per_instance = 1;
+    endgroup
+
+    // COV-10: Activation output stability (stable post-valid)
+    covergroup cg_act_stability @(posedge clk);
+        cp_act_post_valid: coverpoint act_out {
+            bins stable_after_fall = {{1'b1, 1'b1}};
+            bins other = default;
+        }
+        option.per_instance = 1;
+    endgroup
+
+    cg_beat_pc cov_beat_pc = new();
+    cg_protocol cov_protocol = new();
+    cg_neuron cov_neuron = new();
+    cg_thr_rel cov_thr_rel = new();
+    cg_fsm_trans cov_fsm_trans = new();
+    cg_rst_in_state cov_rst_in_state = new();
+    cg_param_sweep cov_param_sweep = new();
+    cg_padding cov_padding = new();
+    cg_neuron_sizes cov_neuron_sizes = new();
+    cg_act_stability cov_act_stability = new();
+
+
+
+
+
     // ------------------------
     //Monitors task block
     // ------------------------
@@ -363,6 +525,7 @@ module neuron_processor_tb;
     // ------------------------------
     // Driver component for main DUT
     // ------------------------------
+    // Helper: drive a single neuron with specified parameters, handling multi-beat packing, valid/last signaling, and expected result calculation for scoreboard reference.
     task automatic drive_main_neuron(input int test_id,
                                      input string test_name,
                                      input bit x_bits[0:MAX_NEURON_INPUTS-1],
@@ -409,7 +572,7 @@ module neuron_processor_tb;
         @(posedge clk);
     endtask
 
-    // Reset helper
+    // Helper: Reset helper
     task automatic apply_reset(input int cycles);
         int c;
         begin
@@ -432,6 +595,98 @@ module neuron_processor_tb;
         end
     endtask
 
+    // Helper: Generate random neuron parameters
+    task automatic gen_random_neuron(
+        output random_neuron_t neuron,
+        input int beat_count_max,
+        input bit force_olm,
+        input int thr_low,
+        input int thr_high
+    );
+        int b, gap_len;
+        int rand_olm_trigger, rand_btb_trigger;
+        begin
+            neuron.num_beats = ($urandom_range(1, beat_count_max) + P_W - 1) / P_W;
+            neuron.n_bits = neuron.num_beats * P_W;
+            neuron.gap_before = new[neuron.num_beats];
+
+            // Gap distribution: [1, 20] cycles before each beat (including first)
+            for (b = 0; b < neuron.num_beats; b++) begin
+                neuron.gap_before[b] = $urandom_range(1, 20);
+            end
+
+            // Threshold strategy
+            neuron.threshold = $urandom_range(thr_low, thr_high);
+
+            // OLM: 20% forced on if force_olm=1, else 20% random
+            rand_olm_trigger = $urandom_range(0, 4);
+            neuron.mode_olm = force_olm ? 1'b1 : (rand_olm_trigger == 0 ? 1'b1 : 1'b0);
+
+            // BTB (back-to-back): 25% probability
+            rand_btb_trigger = $urandom_range(0, 3);
+            neuron.back_to_back = (rand_btb_trigger == 0 ? 1'b1 : 1'b0);
+        end
+    endtask
+
+    // Helper: Drive random neuron with BTB and gap support
+    task automatic drive_random_neuron(
+        input int test_id,
+        input string test_name,
+        input random_neuron_t neuron,
+        input bit x_bits [0:MAX_NEURON_INPUTS-1],
+        input bit w_bits [0:MAX_NEURON_INPUTS-1]
+    );
+        int beat, gap_cycle;
+        exp_pkt_t exp_pkt;
+        int expected_pc;
+        logic expected_act;
+        begin
+            expected_pc = calc_popcount_match(x_bits, w_bits, neuron.n_bits);
+            expected_act = neuron.mode_olm ? 1'b0 : (expected_pc >= neuron.threshold);
+
+            exp_pkt.name              = test_name;
+            exp_pkt.id                = test_id;
+            exp_pkt.expected_popcount = expected_pc;
+            exp_pkt.expected_act      = expected_act;
+            exp_mb.put(exp_pkt);
+
+            for (beat = 0; beat < neuron.num_beats; beat++) begin
+                // Apply gap before beat (cycles of valid_in=0)
+                for (gap_cycle = 0; gap_cycle < neuron.gap_before[beat]; gap_cycle++) begin
+                    @(posedge clk);
+                    valid_in <= 1'b0;
+                    last <= 1'b0;
+                end
+
+                // Drive beat
+                @(posedge clk);
+                valid_in <= 1'b1;
+                last <= (beat == neuron.num_beats - 1);
+                x_in <= pack_main_beat(x_bits, neuron.n_bits, beat, 1'b0);
+                w_in <= pack_main_beat(w_bits, neuron.n_bits, beat, 1'b1);
+                threshold_in <= neuron.threshold;
+                mode_output_layer_sel <= neuron.mode_olm;
+            end
+
+            @(posedge clk);
+            valid_in <= 1'b0;
+            last <= 1'b0;
+
+            // Wait for valid_out pulse
+            wait (valid_out === 1'b1);
+            @(posedge clk);
+
+            // Handle BTB: if enabled, skip the normal idle cycle
+            // and go straight to presenting next neuron's setup
+            if (neuron.back_to_back) begin
+                // BTB: RESET state is handling acc_r_q=0, we skip one idle cycle
+                // and present next neuron immediately
+            end else begin
+                // Normal: 2 cycles post-neuron (RESET + IDLE)
+                @(posedge clk);
+            end
+        end
+    endtask
     // This test checks that changing the threshold mid-neuron does not affect the final output,
     // as long as the threshold is stable on the last beat.
     // This verifies that the FSM correctly register the threshold on the first beat and uses the registered value for all
@@ -626,6 +881,150 @@ module neuron_processor_tb;
         drive_threshold_contract_test();
     endtask
 
+    
+
+    task automatic run_r1_core_stress();
+        int nrn, beat_count_max;
+        random_neuron_t neuron;
+        bit x_bits [0:MAX_NEURON_INPUTS-1];
+        bit w_bits [0:MAX_NEURON_INPUTS-1];
+        int bi, rand_x, rand_w;
+        string test_name;
+        begin
+            beat_count_max = 98;  // Up to 98 beats
+            for (nrn = 0; nrn < 300; nrn++) begin
+                gen_random_neuron(neuron, beat_count_max, 1'b0, 0, neuron.n_bits * P_W);
+
+                // Randomize x/w bits
+                for (bi = 0; bi < neuron.n_bits; bi++) begin
+                    rand_x = $urandom();
+                    rand_w = $urandom();
+                    x_bits[bi] = rand_x[0];
+                    w_bits[bi] = rand_w[0];
+                end
+
+                test_name = $sformatf("R68[%03d] core stress n=%0d beats=%0d olm=%0b btb=%0b",
+                    nrn, neuron.n_bits, neuron.num_beats, neuron.mode_olm, neuron.back_to_back);
+                drive_random_neuron(1000 + nrn, test_name, neuron, x_bits, w_bits);
+                random_tests_run++;
+            end
+        end
+    endtask
+    task automatic run_r2_heavy_gap();
+        int nrn, beat_count_max;
+        random_neuron_t neuron;
+        bit x_bits [0:MAX_NEURON_INPUTS-1];
+        bit w_bits [0:MAX_NEURON_INPUTS-1];
+        int bi, rand_x, rand_w;
+        string test_name;
+        begin
+            beat_count_max = 98;
+            for (nrn = 0; nrn < 100; nrn++) begin
+                gen_random_neuron(neuron, beat_count_max, 1'b0, 0, neuron.n_bits * P_W);
+                // Gaps are already [1,20] from gen_random_neuron, heavy by design
+
+                for (bi = 0; bi < neuron.n_bits; bi++) begin
+                    rand_x = $urandom();
+                    rand_w = $urandom();
+                    x_bits[bi] = rand_x[0];
+                    w_bits[bi] = rand_w[0];
+                end
+
+                test_name = $sformatf("R69[%03d] heavy gap n=%0d beats=%0d gap_min=1",
+                    nrn, neuron.n_bits, neuron.num_beats);
+                drive_random_neuron(1300 + nrn, test_name, neuron, x_bits, w_bits);
+                random_tests_run++;
+            end
+        end
+    endtask
+    
+    
+    task automatic run_r3_threshold_boundary();
+        int nrn, beat_count_max;
+        random_neuron_t neuron;
+        bit x_bits [0:MAX_NEURON_INPUTS-1];
+        bit w_bits [0:MAX_NEURON_INPUTS-1];
+        int bi, rand_x, rand_w, pc, thr_offset;
+        string test_name;
+        begin
+            beat_count_max = 98;
+            for (nrn = 0; nrn < 150; nrn++) begin
+                gen_random_neuron(neuron, beat_count_max, 1'b0, 0, neuron.n_bits * P_W);
+
+                for (bi = 0; bi < neuron.n_bits; bi++) begin
+                    rand_x = $urandom();
+                    rand_w = $urandom();
+                    x_bits[bi] = rand_x[0];
+                    w_bits[bi] = rand_w[0];
+                end
+
+                // Compute popcount and set threshold near it
+                pc = calc_popcount_match(x_bits, w_bits, neuron.n_bits);
+                thr_offset = $urandom_range(-2, 2);
+                neuron.threshold = pc + thr_offset;
+                if (neuron.threshold < 0) neuron.threshold = 0;
+                if (neuron.threshold > neuron.n_bits) neuron.threshold = neuron.n_bits;
+
+                test_name = $sformatf("R70[%03d] boundary pc=%0d thr=%0d offset=%0d",
+                    nrn, pc, neuron.threshold, thr_offset);
+                random_tests_run++;
+            end
+        end
+    endtask
+
+    task automatic run_r4_olm_saturation();
+        int nrn, beat_count_max;
+        random_neuron_t neuron;
+        bit x_bits [0:MAX_NEURON_INPUTS-1];
+        bit w_bits [0:MAX_NEURON_INPUTS-1];
+        int bi, rand_x, rand_w;
+        string test_name;
+        begin
+            beat_count_max = 98;
+            for (nrn = 0; nrn < 75; nrn++) begin
+                gen_random_neuron(neuron, beat_count_max, 1'b1, 0, neuron.n_bits * P_W);  // force_olm=1
+                neuron.mode_olm = 1'b1;  // Explicitly OLM always
+
+                for (bi = 0; bi < neuron.n_bits; bi++) begin
+                    rand_x = $urandom();
+                    rand_w = $urandom();
+                    x_bits[bi] = rand_x[0];
+                    w_bits[bi] = rand_w[0];
+                end
+
+                test_name = $sformatf("R71[%03d] OLM saturation n=%0d beats=%0d olm_forced",
+                    nrn, neuron.n_bits, neuron.num_beats);
+                drive_random_neuron(1550 + nrn, test_name, neuron, x_bits, w_bits);
+                random_tests_run++;
+            end
+        end
+    endtask
+    task automatic run_r5_singlebeat_saturation();
+        int nrn, idx;
+        random_neuron_t neuron;
+        bit x_bits [0:MAX_NEURON_INPUTS-1];
+        bit w_bits [0:MAX_NEURON_INPUTS-1];
+        int rand_val;
+        string test_name;
+        begin
+            for (nrn = 0; nrn < 75; nrn++) begin
+                gen_random_neuron(neuron, 1, 1'b0, 0, 1);
+                neuron.num_beats = 1;
+                neuron.n_bits = 1;
+                for (idx = 0; idx < MAX_NEURON_INPUTS; idx++) begin
+                    x_bits[idx] = 1'b0;
+                    w_bits[idx] = 1'b0;
+                end
+                rand_val = $urandom();
+                x_bits[0] = rand_val[0];
+                rand_val = $urandom();
+                w_bits[0] = rand_val[0];
+                test_name = $sformatf("R72[%03d] single-beat n=1 olm=%0b", nrn, neuron.mode_olm);
+                drive_random_neuron(1625 + nrn, test_name, neuron, x_bits, w_bits);
+                random_tests_run++;
+            end
+        end
+    endtask
 
     // -------------------------------------------------------------------------
     // Testbench control flow
@@ -639,6 +1038,9 @@ module neuron_processor_tb;
         total_checks = 0;
         failed_checks = 0;
         unexpected_assert_fails = 0;
+
+        random_tests_run = 0;
+        random_tests_failed = 0;
         // Start monitor+scoreboard components in parallel.
         
         apply_reset(4);
@@ -651,20 +1053,45 @@ module neuron_processor_tb;
         run_directed_main_suite();
 
         // Let monitor/scoreboard settle and report.
+        $display("[FLOW] ========== SVA DIRECTED TESTS ==========");
         repeat (10) @(posedge clk);
+
+        // --------- Section 2: Constrained-Random Tests ---------
+        $display("[FLOW] ========== CONSTRAINED-RANDOM TESTS ==========");
+        $display("[FLOW] Running R1: Core Stress (300 neurons)...");
+        run_r1_core_stress();
+        
+        $display("[FLOW] Running R2: Heavy Gap (100 neurons)...");
+        run_r2_heavy_gap();
+        
+        $display("[FLOW] Running R3: Threshold Boundary (150 neurons)...");
+        run_r3_threshold_boundary();
+        
+        $display("[FLOW] Running R4: OLM Saturation (75 neurons)...");
+        run_r4_olm_saturation();
+        
+        $display("[FLOW] Running R5: Single-Beat Saturation (75 neurons)...");
+        run_r5_singlebeat_saturation();
+
+        repeat (10) @(posedge clk);
+
 
         $display("-----------------------------------------------");
         $display("--------------SUMMARY SCOREBOARD--------------");
         $display("[SUMMARY]total_testcases=%0d passed=%0d failed=%0d", total_checks, passed_tests.size(), failed_tests.size());
         $display("-----------------------------------------------");
-
+        
+        
+        
         if (passed_tests.size() > 0) begin
-            $display("[SUMMARY][PASSED_TESTS]");
-            for (k = 0; k < passed_tests.size(); k++) begin
+            $display("[SUMMARY][PASSED_TESTS] (Directed subset shown)");
+            for (k = 0; k < (passed_tests.size() < 20 ? passed_tests.size() : 20); k++) begin
                 $display("  %s", passed_tests[k]);
             end
+            if (passed_tests.size() > 20) begin
+                $display("  ... and %0d more", passed_tests.size() - 20);
+            end
         end
-
         if (failed_tests.size() > 0) begin
             $display("[SUMMARY][FAILED_TESTS]");
             for (k = 0; k < failed_tests.size(); k++) begin
@@ -673,12 +1100,29 @@ module neuron_processor_tb;
         end
 
         $display("[SUMMARY][SVA] unexpected_assert_fails=%0d", unexpected_assert_fails);
+        $display("[SUMMARY][RANDOM_TESTS] run=%0d failed=%0d", random_tests_run, random_tests_failed);
 
-        if ((failed_checks == 0) && (unexpected_assert_fails == 0)) begin
-            // Success path is intentionally silent by user request.
+        // --------- Coverage Report ---------
+        $display("-----------------------------------------------");
+        $display("[COVERAGE] Functional Coverage Summary:");
+        $display("  COV-1 (Beat Popcount): %0.1f%%", cov_beat_pc.get_coverage());
+        $display("  COV-2 (Protocol): %0.1f%%", cov_protocol.get_coverage());
+        $display("  COV-3 (Neuron Chars): %0.1f%%", cov_neuron.get_coverage());
+        $display("  COV-4 (Threshold Rel): %0.1f%%", cov_thr_rel.get_coverage());
+        $display("  COV-5 (FSM Trans): %0.1f%%", cov_fsm_trans.get_coverage());
+        $display("  COV-6 (Reset Points): %0.1f%%", cov_rst_in_state.get_coverage());
+        $display("  COV-7 (Param Sweep): %0.1f%%", cov_param_sweep.get_coverage());
+        $display("  COV-8 (Padding): %0.1f%%", cov_padding.get_coverage());
+        $display("  COV-9 (Neuron Sizes): %0.1f%%", cov_neuron_sizes.get_coverage());
+        $display("  COV-10 (Act Stability): %0.1f%%", cov_act_stability.get_coverage());
+
+        if ((failed_checks == 0) && (unexpected_assert_fails == 0) && (random_tests_failed == 0)) begin
+            $display("");
+            $display("[SUCCESS] All tests passed!");
         end else begin
-            $display("[FAILED][SUMMARY] total_checks=%0d failed_checks=%0d unexpected_assert_fails=%0d",
-                     total_checks, failed_checks, unexpected_assert_fails);
+            $display("");
+            $display("[FAILED][SUMMARY] directed_failed=%0d random_failed=%0d sva_fails=%0d",
+                     failed_checks, random_tests_failed, unexpected_assert_fails);
             $fatal(1, "TESTBENCH FAIL");
         end
 
