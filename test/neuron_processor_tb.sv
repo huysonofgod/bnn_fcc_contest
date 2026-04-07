@@ -312,15 +312,24 @@ module neuron_processor_tb;
         option.per_instance = 1;
     endgroup
 
-    // COV-3: Neuron characteristics (beat count, threshold, activation result, OLM, BTB, gaps)
-    covergroup cg_neuron @(posedge clk);
-        cp_neuron_size: coverpoint {1, 7, 8, 13, 16, 32, 256, 784};
-        cp_threshold_bin: coverpoint threshold_in {
+    // COV-3: Neuron characteristics (size, threshold band, activation result)
+    covergroup cg_neuron with function sample(int n_bits_s, int threshold_s, bit act_s);
+        cp_neuron_size: coverpoint n_bits_s {
+            bins n_1   = {1};
+            bins n_7   = {7};
+            bins n_8   = {8};
+            bins n_13  = {13};
+            bins n_16  = {16};
+            bins n_32  = {32};
+            bins n_256 = {256};
+            bins n_784 = {784};
+        }
+        cp_threshold_bin: coverpoint threshold_s {
             bins thr_low    = {[0:100]};
             bins thr_mid    = {[101:400]};
             bins thr_high   = {[401:784]};
         }
-        cp_act_result: coverpoint act_out {
+        cp_act_result: coverpoint act_s {
             bins act_0 = {0};
             bins act_1 = {1};
         }
@@ -328,13 +337,13 @@ module neuron_processor_tb;
     endgroup
 
     // COV-4: Threshold relationship cross (below/equal/above popcount, vs OLM)
-    covergroup cg_thr_rel @(posedge clk);
-        cp_thr_below_above: coverpoint {popcount_out, threshold_in} {
-            bins below = default;
-            bins equal = default;
-            bins above = default;
+    covergroup cg_thr_rel with function sample(bit [1:0] thr_relation_s, bit olm_s, bit act_s);
+        cp_thr_below_above: coverpoint thr_relation_s {
+            bins below = {0};
+            bins equal = {1};
+            bins above = {2};
         }
-        cp_olm_impact: coverpoint {mode_output_layer_sel, act_out} {
+        cp_olm_impact: coverpoint {olm_s, act_s} {
             bins olm_forces_0 = {{1'b1, 1'b0}};
             bins no_olm_result = {{1'b0, 1'b?}};
         }
@@ -355,11 +364,11 @@ module neuron_processor_tb;
     endgroup
 
     // COV-6: Reset insertion point in FSM (from each state)
-    covergroup cg_rst_in_state @(posedge clk);
-        cp_rst_from_state: coverpoint {rst, dut.u_fsm.state_r} {
-            bins rst_from_idle    = {{1'b1, FSM_IDLE}};
-            bins rst_from_compute = {{1'b1, FSM_COMPUTE}};
-            bins rst_from_reset   = {{1'b1, FSM_RESET}};
+    covergroup cg_rst_in_state with function sample(int state_before_reset_s);
+        cp_rst_from_state: coverpoint state_before_reset_s {
+            bins rst_from_idle    = {FSM_IDLE};
+            bins rst_from_compute = {FSM_COMPUTE};
+            bins rst_from_reset   = {FSM_RESET};
         }
         option.per_instance = 1;
     endgroup
@@ -373,8 +382,8 @@ module neuron_processor_tb;
     endgroup
 
     // COV-8: Padding scenarios (n=7, n=13, n=other)
-    covergroup cg_padding @(posedge clk);
-        cp_padded_sizes: coverpoint {1, 7, 8, 13, 16, 32, 256, 784} {
+    covergroup cg_padding with function sample(int n_bits_s);
+        cp_padded_sizes: coverpoint n_bits_s {
             bins n_7_padded   = {7};
             bins n_13_padded  = {13};
             bins n_other      = default;
@@ -383,8 +392,8 @@ module neuron_processor_tb;
     endgroup
 
     // COV-9: Mandatory neuron sizes from spec
-    covergroup cg_neuron_sizes @(posedge clk);
-        cp_mandatory_n: coverpoint {1, 7, 8, 13, 16, 32, 256, 784} {
+    covergroup cg_neuron_sizes with function sample(int n_bits_s);
+        cp_mandatory_n: coverpoint n_bits_s {
             bins n_1   = {1};
             bins n_7   = {7};
             bins n_8   = {8};
@@ -398,10 +407,11 @@ module neuron_processor_tb;
     endgroup
 
     // COV-10: Activation output stability (stable post-valid)
-    covergroup cg_act_stability @(posedge clk);
-        cp_act_post_valid: coverpoint act_out {
-            bins stable_after_fall = {{1'b1, 1'b1}};
-            bins other = default;
+    covergroup cg_act_stability with function sample(bit act_at_valid_s, bit act_after_valid_s);
+        cp_act_post_valid: coverpoint {act_at_valid_s, act_after_valid_s} {
+            bins stable_0 = {{1'b0, 1'b0}};
+            bins stable_1 = {{1'b1, 1'b1}};
+            illegal_bins unstable = default;
         }
         option.per_instance = 1;
     endgroup
@@ -538,6 +548,9 @@ module neuron_processor_tb;
         exp_pkt_t exp_pkt;
         int expected_pc;
         logic expected_act;
+        logic act_at_valid;
+        logic act_after_valid;
+        logic [1:0] thr_relation;
 
         beats                     = (n_bits + P_W - 1) / P_W;
         expected_pc               = calc_popcount_match(x_bits, w_bits, n_bits);
@@ -548,6 +561,10 @@ module neuron_processor_tb;
         exp_pkt.expected_act      = expected_act;
         exp_pkt.neuron_size_bits  = n_bits;
         exp_pkt.expected_mode_olm = mode_olm;
+
+        if (expected_pc < threshold)      thr_relation = 2'd0;
+        else if (expected_pc == threshold) thr_relation = 2'd1;
+        else                              thr_relation = 2'd2;
 
         // Push expected before driving so scoreboard can pair with monitor output.
         exp_mb.put(exp_pkt);
@@ -567,6 +584,18 @@ module neuron_processor_tb;
         @(posedge clk);
         valid_in <= 1'b0;
         last     <= 1'b0;
+
+        // Sample completion-oriented coverage on valid_out pulse.
+        wait (valid_out === 1'b1);
+        act_at_valid = act_out;
+        cov_neuron.sample(n_bits, threshold, act_at_valid);
+        cov_thr_rel.sample(thr_relation, mode_olm, act_at_valid);
+        cov_padding.sample(n_bits);
+        cov_neuron_sizes.sample(n_bits);
+        @(posedge clk);
+        act_after_valid = act_out;
+        cov_act_stability.sample(act_at_valid, act_after_valid);
+
         // Wait for DUT to finish processing and return to idle before exiting task to avoid inter-test interference.
         wait (valid_out == 1'b0); 
         @(posedge clk);
@@ -576,6 +605,7 @@ module neuron_processor_tb;
     task automatic apply_reset(input int cycles);
         int c;
         begin
+            cov_rst_in_state.sample(dut.u_fsm.state_r);
             @(posedge clk);
             rst <= 1'b1;
             valid_in <= 1'b0;
@@ -588,10 +618,81 @@ module neuron_processor_tb;
             for (c = 0; c < cycles - 1; c++) begin
                 @(posedge clk);
                 rst <= 1'b1;
+                cov_rst_in_state.sample(dut.u_fsm.state_r);
             end
 
             @(posedge clk);
             rst <= 1'b0;
+        end
+    endtask
+
+    // Directed reset during compute to guarantee COV-6 reset_from_compute bin.
+    task automatic drive_reset_from_compute();
+        bit x_bits[0:MAX_NEURON_INPUTS-1];
+        bit w_bits[0:MAX_NEURON_INPUTS-1];
+        int i;
+        begin
+            clear_vectors(x_bits, w_bits);
+            for (i = 0; i < 16; i++) begin
+                x_bits[i] = 1'b1;
+                w_bits[i] = 1'b1;
+            end
+
+            @(posedge clk);
+            valid_in              <= 1'b1;
+            last                  <= 1'b0;
+            x_in                  <= pack_main_beat(x_bits, 16, 0, 1'b0);
+            w_in                  <= pack_main_beat(w_bits, 16, 0, 1'b1);
+            threshold_in          <= 16;
+            mode_output_layer_sel <= 1'b0;
+
+            // Enter reset while the FSM is in COMPUTE.
+            cov_rst_in_state.sample(dut.u_fsm.state_r);
+            apply_reset(2);
+            @(posedge clk);
+            valid_in <= 1'b0;
+            last <= 1'b0;
+        end
+    endtask
+
+    // Directed reset while FSM is in RESET state to close COV-6 rst_from_reset bin.
+    task automatic drive_reset_from_reset_state();
+        bit x_bits[0:MAX_NEURON_INPUTS-1];
+        bit w_bits[0:MAX_NEURON_INPUTS-1];
+        exp_pkt_t exp_pkt;
+        int i;
+        begin
+            clear_vectors(x_bits, w_bits);
+            for (i = 0; i < 8; i++) begin
+                x_bits[i] = 1'b1;
+                w_bits[i] = 1'b1;
+            end
+
+            exp_pkt.id                = 17;
+            exp_pkt.name              = "reset asserted while FSM_RESET state active";
+            exp_pkt.expected_popcount = 8;
+            exp_pkt.expected_act      = 1'b1;
+            exp_pkt.neuron_size_bits  = 8;
+            exp_pkt.expected_mode_olm = 1'b0;
+            exp_mb.put(exp_pkt);
+
+            @(posedge clk);
+            valid_in              <= 1'b1;
+            last                  <= 1'b1;
+            x_in                  <= pack_main_beat(x_bits, 8, 0, 1'b0);
+            w_in                  <= pack_main_beat(w_bits, 8, 0, 1'b1);
+            threshold_in          <= 4;
+            mode_output_layer_sel <= 1'b0;
+
+            @(posedge clk);
+            valid_in <= 1'b0;
+            last <= 1'b0;
+
+            // valid_out high corresponds to FSM_RESET. Assert reset here.
+            wait (valid_out === 1'b1);
+            cov_rst_in_state.sample(dut.u_fsm.state_r);
+            apply_reset(2);
+            @(posedge clk);
         end
     endtask
 
@@ -640,9 +741,15 @@ module neuron_processor_tb;
         exp_pkt_t exp_pkt;
         int expected_pc;
         logic expected_act;
+        logic [1:0] thr_relation;
+        logic act_after_valid;
         begin
             expected_pc = calc_popcount_match(x_bits, w_bits, neuron.n_bits);
             expected_act = neuron.mode_olm ? 1'b0 : (expected_pc >= neuron.threshold);
+
+            if (expected_pc < neuron.threshold)      thr_relation = 2'd0;
+            else if (expected_pc == neuron.threshold) thr_relation = 2'd1;
+            else                                      thr_relation = 2'd2;
 
             exp_pkt.name              = test_name;
             exp_pkt.id                = test_id;
@@ -674,7 +781,13 @@ module neuron_processor_tb;
 
             // Wait for valid_out pulse
             wait (valid_out === 1'b1);
+            cov_neuron.sample(neuron.n_bits, neuron.threshold, act_out);
+            cov_thr_rel.sample(thr_relation, neuron.mode_olm, act_out);
+            cov_padding.sample(neuron.n_bits);
+            cov_neuron_sizes.sample(neuron.n_bits);
             @(posedge clk);
+            act_after_valid = act_out;
+            cov_act_stability.sample(expected_act, act_after_valid);
 
             // Handle BTB: if enabled, skip the normal idle cycle
             // and go straight to presenting next neuron's setup
@@ -865,6 +978,8 @@ module neuron_processor_tb;
         clear_vectors(x_bits, w_bits);
         for (i = 0; i < 32; i++) begin x_bits[i] = 1'b1; w_bits[i] = 1'b1; end
         drive_main_neuron(15, "OLM suppresses activation output", x_bits, w_bits, 32, 0, 1'b1);
+        drive_reset_from_compute();
+        drive_reset_from_reset_state();
         
         // wait (valid_out == 1'b1);
         // @(posedge clk);
