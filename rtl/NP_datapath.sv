@@ -80,9 +80,9 @@ module NP_datapath #(
             //TODO: check if this reset is necessary given that acc_sel can clear the accumulator to reduce fanout of the reset signal
             //Removing itin the future to opmize for timing, but can add back if needed    
             //Dont need to reset since they are invalid
-            // acc_r_q <= '0;
             // activation_r_q <= '0;
             // out_score_r <= '0;
+            acc_r_q <= '0;
             valid_out_r_q <= '0;
         end
     end

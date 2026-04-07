@@ -379,7 +379,7 @@ module neuron_processor_tb;
         beats                     = (n_bits + P_W - 1) / P_W;
         expected_pc               = calc_popcount_match(x_bits, w_bits, n_bits);
         expected_act              = mode_olm ? 1'b0 : (expected_pc >= threshold);
-
+        exp_pkt.id                = test_id;
         exp_pkt.name              = test_name;
         exp_pkt.expected_popcount = expected_pc;
         exp_pkt.expected_act      = expected_act;
@@ -631,9 +631,11 @@ module neuron_processor_tb;
     // Testbench control flow
     // -------------------------------------------------------------------------
     initial begin
+        int k;
+
         exp_mb = new();
         act_mb = new();
-
+        
         total_checks = 0;
         failed_checks = 0;
         unexpected_assert_fails = 0;
@@ -656,11 +658,30 @@ module neuron_processor_tb;
         $display("[SUMMARY]total_testcases=%0d passed=%0d failed=%0d", total_checks, passed_tests.size(), failed_tests.size());
         $display("-----------------------------------------------");
 
-        if (failed_checks == 0) begin
-            $display("TESTBENCH PASS");
+        if (passed_tests.size() > 0) begin
+            $display("[SUMMARY][PASSED_TESTS]");
+            for (k = 0; k < passed_tests.size(); k++) begin
+                $display("  %s", passed_tests[k]);
+            end
+        end
+
+        if (failed_tests.size() > 0) begin
+            $display("[SUMMARY][FAILED_TESTS]");
+            for (k = 0; k < failed_tests.size(); k++) begin
+                $display("  %s", failed_tests[k]);
+            end
+        end
+
+        $display("[SUMMARY][SVA] unexpected_assert_fails=%0d", unexpected_assert_fails);
+
+        if ((failed_checks == 0) && (unexpected_assert_fails == 0)) begin
+            // Success path is intentionally silent by user request.
         end else begin
+            $display("[FAILED][SUMMARY] total_checks=%0d failed_checks=%0d unexpected_assert_fails=%0d",
+                     total_checks, failed_checks, unexpected_assert_fails);
             $fatal(1, "TESTBENCH FAIL");
         end
+
         $finish;
     end
 
