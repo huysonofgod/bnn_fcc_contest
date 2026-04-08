@@ -1,7 +1,6 @@
 `timescale 1ns / 10ps
 
-
-module neuron_processor_tb_rewrite_worker #(
+module neuron_processor_tb_worker #(
     parameter int P_W = 8
 ) (
     output logic done
@@ -193,6 +192,15 @@ module neuron_processor_tb_rewrite_worker #(
         @(posedge clk) disable iff (rst)
             (valid_in && last && $past(valid_in)) |-> $stable(threshold_in);
     endproperty
+
+    // Protocol constraint: last is only legal when valid_in is asserted.
+    property p_last_needs_vld;
+        @(posedge clk) disable iff (rst) last |-> valid_in;
+    endproperty
+
+    // Assertion coverage hook: hit whenever legal last-with-valid occurs.
+    C_LAST_NEEDS_VLD_HIT:
+    cover property (@(posedge clk) disable iff (rst) (last && valid_in));
     
 
     A_OLM_FORCES_ACT0 :
@@ -279,6 +287,13 @@ module neuron_processor_tb_rewrite_worker #(
         $error("[FAILED][SVA] A_THR_STABLE_ON_LAST check='threshold stable on final beat' scope=%m time=%0t", $time);
     end
 
+    A_LAST_NEEDS_VLD:
+    assert property (p_last_needs_vld)
+    else begin
+        unexpected_assert_fails++;
+        $error("[FAILED][SVA] A_LAST_NEEDS_VLD check='last implies valid_in' scope=%m time=%0t", $time);
+    end
+
     // ------------------------
     // Formal coverage group
     // ------------------------
@@ -301,6 +316,10 @@ module neuron_processor_tb_rewrite_worker #(
             bins valid_in_compute = {{1'b1, FSM_COMPUTE}};
             bins idle_idle      = {{1'b0, FSM_IDLE}};
             bins idle_compute   = {{1'b0, FSM_COMPUTE}};
+        }
+        cp_last_valid_pair: coverpoint {last, valid_in} {
+            bins legal_last = {{1'b1, 1'b1}};
+            illegal_bins illegal_last = {{1'b1, 1'b0}};
         }
         cp_valid_out: coverpoint valid_out {
             bins valid_out_pulse = {1};
@@ -346,7 +365,8 @@ module neuron_processor_tb_rewrite_worker #(
         }
         cp_olm_impact: coverpoint {olm_s, act_s} {
             bins olm_forces_0 = {{1'b1, 1'b0}};
-            bins no_olm_result = {{1'b0, 1'b?}};
+            bins no_olm_act0 = {{1'b0, 1'b0}};
+            bins no_olm_act1 = {{1'b0, 1'b1}};
         }
         option.per_instance = 1;
     endgroup
@@ -1032,9 +1052,7 @@ module neuron_processor_tb_rewrite_worker #(
     endtask
 
     
-    //---------------------------------------
-    // Randomized stress tests tasks 
-    //---------------------------------------
+
     task automatic run_r1_core_stress();
         int nrn, beat_count_max;
         random_neuron_t neuron;
@@ -1284,50 +1302,5 @@ module neuron_processor_tb_rewrite_worker #(
         done = 1'b1;
     end
 
-
-endmodule
-
-// Top-level testbench module that instantiates multiple workers for different P_W values
-module neuron_processor_tb_rewrite;
-
-    logic done_pw1;
-    logic done_pw2;
-    logic done_pw4;
-    logic done_pw8;
-    logic done_pw16;
-
-    genvar gi;
-    generate
-        for (gi = 0; gi < 5; gi++) begin : GEN_PW_SWEEP
-            if (gi == 0) begin : DUT_PW_1
-                neuron_processor_tb_rewrite_worker #(.P_W(1)) u_tb_pw1 (.done(done_pw1));
-            end
-            if (gi == 1) begin : DUT_PW_2
-                neuron_processor_tb_rewrite_worker #(.P_W(2)) u_tb_pw2 (.done(done_pw2));
-            end
-            if (gi == 2) begin : DUT_PW_4
-                neuron_processor_tb_rewrite_worker #(.P_W(4)) u_tb_pw4 (.done(done_pw4));
-            end
-            if (gi == 3) begin : DUT_PW_8
-                neuron_processor_tb_rewrite_worker #(.P_W(8)) u_tb_pw8 (.done(done_pw8));
-            end
-            if (gi == 4) begin : DUT_PW_16
-                neuron_processor_tb_rewrite_worker #(.P_W(16)) u_tb_pw16 (.done(done_pw16));
-            end
-        end
-    endgenerate
-
-    initial begin
-        fork
-            begin wait (done_pw1);  $display("[TOP] DUT_PW_1 complete");  end
-            begin wait (done_pw2);  $display("[TOP] DUT_PW_2 complete");  end
-            begin wait (done_pw4);  $display("[TOP] DUT_PW_4 complete");  end
-            begin wait (done_pw8);  $display("[TOP] DUT_PW_8 complete");  end
-            begin wait (done_pw16); $display("[TOP] DUT_PW_16 complete"); end
-        join
-
-        $display("[TOP] All concurrent P_W workers completed");
-        $finish;
-    end
 
 endmodule

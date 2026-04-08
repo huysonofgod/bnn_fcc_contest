@@ -2,5 +2,6 @@
 work
 sim.log
 .gitignore
-vsim.wlf
+*.wlf
 transcript
+*.sh
