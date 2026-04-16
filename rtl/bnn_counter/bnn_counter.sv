@@ -1,3 +1,5 @@
+`timescale 1ns/1ps
+
 module bnn_counter #(
     parameter int WIDTH     = 8,
     parameter int RESET_VAL = 0
