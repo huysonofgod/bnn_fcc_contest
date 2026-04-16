@@ -9,7 +9,7 @@ module NP_fsm(
     output logic activation_r_we,
     output logic out_score_r_we,
     output logic valid_out_we,
-    //DEBUG SIGNALS ---REMIND: delete once verified correct---
+    // Debug signals for bring-up; remove after verification
     //TODO: comment out the debug signals once verified correct to save on routing congestion and potential timing issues
     output logic dbg_accept_beat,
     output logic dbg_neuron_done

@@ -1,7 +1,10 @@
 .vscode
+logs/
 work
 sim.log
 .gitignore
 *.wlf
 transcript
 *.sh
+*.f
+rtl/bnn_np_bank/deps.f

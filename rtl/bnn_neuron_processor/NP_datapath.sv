@@ -23,7 +23,7 @@ module NP_datapath #(
     output logic                 activation_out,
     output logic                 valid_out,
 
-    //DEBUG SIGNALS ---delete once verified correct---
+    // Debug signals for bring-up; remove after verification
     //TODO: comment out the debug signals once verified correct to save on routing congestion and potential timing issues
     output logic [P_W-1:0]       dbg_xnor_bits,
     output logic [$clog2(P_W + 1)-1:0] dbg_beat_popcount,
