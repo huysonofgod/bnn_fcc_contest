@@ -38,7 +38,7 @@ module bnn_threshold_assembler_tb;
     //==========================================================================
 
     //--------------------------------------------------------------------------
-    // SVA-1: thresh_valid asserts after exactly 4 byte handshakes
+    // thresh_valid asserts after exactly 4 byte handshakes
     // RATIONALE: 32-bit threshold = 4 bytes. The internal byte_cnt_r_q reaches
     // 3 (0-indexed) on the 4th byte, triggering assembly_done -> thresh_valid.
     //--------------------------------------------------------------------------
@@ -47,10 +47,10 @@ module bnn_threshold_assembler_tb;
         (DUT.u_dp.byte_cnt_r_q == 2'd3 && byte_valid && byte_ready) |=> thresh_valid;
     endproperty
     assert property (p_valid_after_4_bytes)
-    else $error("[SVA-1] FAIL: thresh_valid did not assert after 4th byte handshake");
+    else $error("[assertion] FAIL: thresh_valid did not assert after 4th byte handshake");
 
     //--------------------------------------------------------------------------
-    // SVA-2: AXI-Stream valid-hold on output -- once thresh_valid is asserted
+    // AXI-Stream valid-hold on output -- once thresh_valid is asserted
     // and thresh_ready is low, thresh_valid must remain high until consumed.
     // RATIONALE: AXI4-Stream protocol compliance; dropping valid is illegal.
     //--------------------------------------------------------------------------
@@ -59,10 +59,10 @@ module bnn_threshold_assembler_tb;
         (thresh_valid && !thresh_ready) |=> thresh_valid;
     endproperty
     assert property (p_thresh_valid_hold)
-    else $error("[SVA-2] FAIL: thresh_valid dropped without thresh_ready handshake");
+    else $error("[assertion] FAIL: thresh_valid dropped without thresh_ready handshake");
 
     //--------------------------------------------------------------------------
-    // SVA-3: thresh_data stable during backpressure -- when thresh_valid is
+    // thresh_data stable during backpressure -- when thresh_valid is
     // asserted but not consumed, data must not change.
     // RATIONALE: AXI4-Stream data stability requirement.
     //--------------------------------------------------------------------------
@@ -71,10 +71,10 @@ module bnn_threshold_assembler_tb;
         (thresh_valid && !thresh_ready) |=> $stable(thresh_data);
     endproperty
     assert property (p_thresh_data_stable)
-    else $error("[SVA-3] FAIL: thresh_data changed during backpressure");
+    else $error("[assertion] FAIL: thresh_data changed during backpressure");
 
     //--------------------------------------------------------------------------
-    // SVA-4: byte_ready backpressure when output stalled -- when thresh_valid
+    // byte_ready backpressure when output stalled -- when thresh_valid
     // is high and thresh_ready is low, byte_ready must be low to stop input.
     // RATIONALE: byte_ready = ~thresh_vld_r_q | thresh_ready. When stalled,
     // no new bytes should be accepted.
@@ -84,7 +84,7 @@ module bnn_threshold_assembler_tb;
         (thresh_valid && !thresh_ready) |-> !byte_ready;
     endproperty
     assert property (p_byte_ready_backpressure)
-    else $error("[SVA-4] FAIL: byte_ready high while output stalled");
+    else $error("[assertion] FAIL: byte_ready high while output stalled");
 
     //==========================================================================
     // Covergroups
@@ -205,7 +205,7 @@ module bnn_threshold_assembler_tb;
     // Test Scenarios
     //==========================================================================
 
-    //--- Test 1: Known value -- {0x78, 0x56, 0x34, 0x12} -> 0x12345678 --------
+    // Known value -- {0x78, 0x56, 0x34, 0x12} -> 0x12345678
     task automatic test_known_value();
         logic [31:0] result;
         $display("[TEST] test_known_value: expect 0x12345678");
@@ -214,7 +214,7 @@ module bnn_threshold_assembler_tb;
               $sformatf("expected 0x12345678, got 0x%08h", result));
     endtask
 
-    //--- Test 2: Zero threshold -- all zero bytes -> 0x00000000 ----------------
+    // Zero threshold -- all zero bytes -> 0x00000000
     task automatic test_zero_threshold();
         logic [31:0] result;
         $display("[TEST] test_zero_threshold");
@@ -223,7 +223,7 @@ module bnn_threshold_assembler_tb;
               $sformatf("expected 0x00000000, got 0x%08h", result));
     endtask
 
-    //--- Test 3: Maximum threshold -- all 0xFF -> 0xFFFFFFFF -------------------
+    // Maximum threshold -- all 0xFF -> 0xFFFFFFFF
     task automatic test_max_threshold();
         logic [31:0] result;
         $display("[TEST] test_max_threshold");
@@ -232,7 +232,7 @@ module bnn_threshold_assembler_tb;
               $sformatf("expected 0xFFFFFFFF, got 0x%08h", result));
     endtask
 
-    //--- Test 4: Backpressure test -- thresh_ready=0 after 4th byte -----------
+    // Backpressure test -- thresh_ready=0 after 4th byte
     task automatic test_backpressure();
         logic [31:0] result;
         $display("[TEST] test_backpressure");
@@ -241,7 +241,7 @@ module bnn_threshold_assembler_tb;
               $sformatf("expected 0xDDCCBBAA, got 0x%08h", result));
     endtask
 
-    //--- Test 5: Gapped bytes -- byte_valid gaps between bytes -----------------
+    // Gapped bytes -- byte_valid gaps between bytes
     task automatic test_gapped_bytes();
         logic [31:0] result;
         $display("[TEST] test_gapped_bytes");
@@ -250,7 +250,7 @@ module bnn_threshold_assembler_tb;
               $sformatf("expected 0x04030201, got 0x%08h", result));
     endtask
 
-    //--- Test 6: Back-to-back thresholds -- continuous 4-byte streams ----------
+    // Back-to-back thresholds -- continuous 4-byte streams
     task automatic test_back_to_back();
         logic [31:0] result;
         logic [31:0] expected;
@@ -288,7 +288,7 @@ module bnn_threshold_assembler_tb;
         thresh_ready <= 1'b0;
     endtask
 
-    //--- Test 7: Random stress -- random byte values, random gaps/backpressure -
+    // Random stress -- random byte values, random gaps/backpressure
     task automatic test_random_stress();
         logic [31:0] result;
         logic [7:0] b [4];
@@ -308,7 +308,7 @@ module bnn_threshold_assembler_tb;
         end
     endtask
 
-    //--- Test 8: LE reconstruction -- specific patterns for endianness ---------
+    // LE reconstruction -- specific patterns for endianness
     task automatic test_le_reconstruction();
         logic [31:0] result;
         $display("[TEST] test_le_reconstruction: verify {B3,B2,B1,B0}");

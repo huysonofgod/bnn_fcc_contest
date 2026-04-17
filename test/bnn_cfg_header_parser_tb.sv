@@ -71,7 +71,7 @@ module bnn_cfg_header_parser_tb;
         hdr_valid |=> !hdr_valid;
     endproperty
     assert property (p_hdr_valid_single_cycle)
-    else $error("[SVA-1] FAIL: hdr_valid lasted more than 1 cycle");
+    else $error("[assertion] FAIL: hdr_valid lasted more than 1 cycle");
 
     //--------------------------------------------------------------------------
     // msg_done is exactly 1 clock cycle pulse -- clean message
@@ -82,7 +82,7 @@ module bnn_cfg_header_parser_tb;
         msg_done |=> !msg_done;
     endproperty
     assert property (p_msg_done_single_cycle)
-    else $error("[SVA-2] FAIL: msg_done lasted more than 1 cycle");
+    else $error("[assertion] FAIL: msg_done lasted more than 1 cycle");
 
     //--------------------------------------------------------------------------
     // Exactly 16 byte handshakes before hdr_valid -- fixed 16-byte
@@ -93,7 +93,7 @@ module bnn_cfg_header_parser_tb;
         hdr_valid |-> (DUT.u_dp.hdr_byte_cnt_r_q == 4'd15);
     endproperty
     assert property (p_header_16_bytes)
-    else $error("[SVA-3] FAIL: hdr_valid at byte_cnt=%0d (expected 15)",
+    else $error("[assertion] FAIL: hdr_valid at byte_cnt=%0d (expected 15)",
                 DUT.u_dp.hdr_byte_cnt_r_q);
 
     //--------------------------------------------------------------------------
@@ -105,7 +105,7 @@ module bnn_cfg_header_parser_tb;
         payload_valid |-> (payload_data == byte_data);
     endproperty
     assert property (p_payload_passthrough)
-    else $error("[SVA-4] FAIL: payload_data != byte_data during payload_valid");
+    else $error("[assertion] FAIL: payload_data != byte_data during payload_valid");
 
     //--------------------------------------------------------------------------
     // payload_last_byte implies payload_valid -- last_byte is a
@@ -116,7 +116,7 @@ module bnn_cfg_header_parser_tb;
         payload_last_byte |-> payload_valid;
     endproperty
     assert property (p_payload_last_implies_valid)
-    else $error("[SVA-5] FAIL: payload_last_byte without payload_valid");
+    else $error("[assertion] FAIL: payload_last_byte without payload_valid");
 
     //--------------------------------------------------------------------------
     // Payload byte count matches total_bytes from header -- the number
@@ -128,7 +128,7 @@ module bnn_cfg_header_parser_tb;
             (DUT.u_dp.payload_byte_cnt_r_q == (DUT.u_dp.total_bytes_r_q - 32'd1));
     endproperty
     assert property (p_payload_count_matches_total)
-    else $error("[SVA-6] FAIL: payload byte count mismatch at msg_done");
+    else $error("[assertion] FAIL: payload byte count mismatch at msg_done");
 
     //==========================================================================
     // Covergroups
@@ -353,7 +353,7 @@ module bnn_cfg_header_parser_tb;
     // Test Scenarios
     //==========================================================================
 
-    //--- Test 1: Single message, small payload --------------------------------
+    // Single message, small payload
     task automatic test_single_small();
         logic [7:0] payload[$];
         $display("[TEST] test_single_small: msg_type=0x01, 4 payload bytes");
@@ -362,7 +362,7 @@ module bnn_cfg_header_parser_tb;
                      payload, 1'b1, 0, 1.0, "single_small");
     endtask
 
-    //--- Test 2: Single message, larger payload --------------------------------
+    // Single message, larger payload
     task automatic test_single_large();
         logic [7:0] payload[$];
         $display("[TEST] test_single_large: 100 payload bytes");
@@ -373,7 +373,7 @@ module bnn_cfg_header_parser_tb;
                      payload, 1'b1, 0, 1.0, "single_large");
     endtask
 
-    //--- Test 3: Back-to-back messages (no TLAST between) ----------------------
+    // Back-to-back messages (no TLAST between)
     task automatic test_back_to_back();
         logic [7:0] payload[$];
         $display("[TEST] test_back_to_back: 3 messages, no TLAST between");
@@ -396,7 +396,7 @@ module bnn_cfg_header_parser_tb;
                      payload, 1'b1, 0, 1.0, "b2b_msg3");
     endtask
 
-    //--- Test 4: Zero-payload message (total_bytes=0 edge case) ---------------
+    // Zero-payload message (total_bytes=0 edge case)
     task automatic test_zero_payload();
         logic [7:0] payload[$];
         $display("[TEST] test_zero_payload: total_bytes=0 (edge case)");
@@ -405,7 +405,7 @@ module bnn_cfg_header_parser_tb;
                      payload, 1'b1, 0, 1.0, "zero_payload");
     endtask
 
-    //--- Test 5: Payload backpressure (payload_ready toggling) -----------------
+    // Payload backpressure (payload_ready toggling)
     task automatic test_payload_backpressure();
         logic [7:0] payload[$];
         $display("[TEST] test_payload_backpressure: 50%% ready probability");
@@ -416,7 +416,7 @@ module bnn_cfg_header_parser_tb;
                      payload, 1'b1, 0, 0.5, "payload_bp");
     endtask
 
-    //--- Test 6: Explicit idle cycles while in PARSE_HEADER -------------------
+    // Explicit idle cycles while in PARSE_HEADER
     task automatic test_header_idle_parse();
         logic [7:0] payload[$];
         $display("[TEST] test_header_idle_parse: idle cycles before first header byte");
@@ -426,7 +426,7 @@ module bnn_cfg_header_parser_tb;
                      payload, 1'b1, 0, 1.0, "header_idle_parse");
     endtask
 
-    //--- Test 6: Large payload header bin closure -----------------------------
+    // Large payload header bin closure
     task automatic test_large_payload_header();
         logic [7:0] payload[$];
         $display("[TEST] test_large_payload_header: total_bytes=300");
@@ -437,7 +437,7 @@ module bnn_cfg_header_parser_tb;
                      payload, 1'b1, 0, 1.0, "large_payload");
     endtask
 
-    //--- Test 7: Field value verification (known header, verify extraction) ----
+    // Field value verification (known header, verify extraction)
     task automatic test_field_verification();
         logic [7:0] hdr_bytes [16];
         logic [7:0] payload[$];
@@ -499,7 +499,7 @@ module bnn_cfg_header_parser_tb;
         repeat (5) @(posedge clk);
     endtask
 
-    //--- Test 7: Gapped byte input -- random valid gaps -----------------------
+    // Gapped byte input -- random valid gaps
     task automatic test_gapped_input();
         logic [7:0] payload[$];
         $display("[TEST] test_gapped_input: random byte_valid gaps");
@@ -510,7 +510,7 @@ module bnn_cfg_header_parser_tb;
                      payload, 1'b1, 1, 1.0, "gapped_input");
     endtask
 
-    //--- Test 8: TLAST mid-payload -- verify boundary detection ----------------
+    // TLAST mid-payload -- verify boundary detection
     task automatic test_tlast_mid_payload();
         logic [7:0] payload[$];
         $display("[TEST] test_tlast_mid_payload: TLAST at last payload byte");
@@ -519,7 +519,7 @@ module bnn_cfg_header_parser_tb;
                      payload, 1'b1, 0, 1.0, "tlast_mid");
     endtask
 
-    //--- Test 9: Random stress -- varied message sizes ------------------------
+    // Random stress -- varied message sizes
     task automatic test_random_stress();
         int num_msgs = RANDOM_MSGS;
         $display("[TEST] test_random_stress: %0d random messages", num_msgs);
@@ -545,7 +545,7 @@ module bnn_cfg_header_parser_tb;
         end
     endtask
 
-    //--- Test 10: Error injection -- invalid msg_type values ------------------
+    // Error injection -- invalid msg_type values
     task automatic test_invalid_msg_type();
         logic [7:0] payload[$];
         $display("[TEST] test_invalid_msg_type: msg_type=0xFF");

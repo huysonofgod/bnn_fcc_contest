@@ -57,7 +57,7 @@ module bnn_counter_tb;
         tc_pulse |=> !tc_pulse;
     endproperty
     assert property (p_tc_pulse_single_cycle)
-    else $error("[SVA-1] FAIL: tc_pulse was high for more than 1 cycle");
+    else $error("[assertion] FAIL: tc_pulse was high for more than 1 cycle");
 
     //--------------------------------------------------------------------------
     // tc_pulse fires only when tc AND en were both true in prior cycle
@@ -69,7 +69,7 @@ module bnn_counter_tb;
         tc_pulse |-> $past(tc && en);
     endproperty
     assert property (p_tc_pulse_requires_tc_and_en)
-    else $error("[SVA-2] FAIL: tc_pulse fired without prior tc && en");
+    else $error("[assertion] FAIL: tc_pulse fired without prior tc && en");
 
     //--------------------------------------------------------------------------
     // Count increments only when en=1 and load=0 and not at tc
@@ -81,7 +81,7 @@ module bnn_counter_tb;
         (en && !load && !tc) |=> (count == ($past(count) + WIDTH'(1)));
     endproperty
     assert property (p_count_increments_on_en)
-    else $error("[SVA-3] FAIL: count did not increment when en=1, load=0, no wrap");
+    else $error("[assertion] FAIL: count did not increment when en=1, load=0, no wrap");
 
     //--------------------------------------------------------------------------
     // Count holds steady when en=0 and load=0
@@ -91,7 +91,7 @@ module bnn_counter_tb;
         (!en && !load) |=> (count == $past(count));
     endproperty
     assert property (p_count_holds_when_disabled)
-    else $error("[SVA-4] FAIL: count changed while en=0 and load=0");
+    else $error("[assertion] FAIL: count changed while en=0 and load=0");
 
     //--------------------------------------------------------------------------
     // Load has priority over enable (synchronous parallel load)
@@ -103,7 +103,7 @@ module bnn_counter_tb;
         load |=> (count == $past(load_val));
     endproperty
     assert property (p_load_priority)
-    else $error("[SVA-5] FAIL: load did not override -- count != past load_val");
+    else $error("[assertion] FAIL: load did not override -- count != past load_val");
 
     //--------------------------------------------------------------------------
     // Counter wraps to RESET_VAL after terminal count with enable
@@ -115,7 +115,7 @@ module bnn_counter_tb;
         (tc && en && !load) |=> (count == WIDTH'(RESET_VAL));
     endproperty
     assert property (p_wrap_after_tc)
-    else $error("[SVA-6] FAIL: counter did not wrap to RESET_VAL after tc+en");
+    else $error("[assertion] FAIL: counter did not wrap to RESET_VAL after tc+en");
 
     //==========================================================================
     // Covergroups
@@ -207,7 +207,7 @@ module bnn_counter_tb;
     // Test Scenarios
     //==========================================================================
 
-    //--- Test 1: Free-run count from 0 to max_val, verify wrap ----------------
+    // Free-run count from 0 to max_val and verify wrap behavior
     task automatic test_free_run();
         logic [WIDTH-1:0] expected;
         $display("[TEST] test_free_run: max_val=10");
@@ -231,7 +231,7 @@ module bnn_counter_tb;
         @(posedge clk);
     endtask
 
-    //--- Test 2: Load test -- various values, verify immediate capture --------
+    // Load various values and verify immediate capture
     task automatic test_load();
         $display("[TEST] test_load: load various values");
         @(posedge clk);
@@ -250,7 +250,7 @@ module bnn_counter_tb;
         end
     endtask
 
-    //--- Test 3: Enable gating -- toggle en, verify count freezes -------------
+    // Toggle enable and verify the count freezes while disabled
     task automatic test_enable_gating();
         logic [WIDTH-1:0] frozen_val;
         $display("[TEST] test_enable_gating");
@@ -278,7 +278,7 @@ module bnn_counter_tb;
         en <= 1'b0;
     endtask
 
-    //--- Test 4: max_val=0 -- tc fires immediately ----------------------------
+    // Verify terminal-count behavior when max_val is zero
     task automatic test_max_val_zero();
         $display("[TEST] test_max_val_zero (edge case)");
         reset_dut();
@@ -304,7 +304,7 @@ module bnn_counter_tb;
         en <= 1'b0;
     endtask
 
-    //--- Test 5: max_val=1 -- two-state counter --------------------------------
+    // Verify two-state counter behavior when max_val is one
     task automatic test_max_val_one();
         $display("[TEST] test_max_val_one (two-state)");
         reset_dut();
@@ -323,7 +323,7 @@ module bnn_counter_tb;
         en <= 1'b0;
     endtask
 
-    //--- Test 6: Load during tc -- verify load takes priority ------------------
+    // Verify load takes priority when terminal count and load coincide
     task automatic test_load_during_tc();
         $display("[TEST] test_load_during_tc");
         reset_dut();
@@ -346,7 +346,7 @@ module bnn_counter_tb;
         en <= 1'b0;
     endtask
 
-    //--- Test 7: Random stress -- constrained random for 2000+ cycles ----------
+    // Constrained-random stress over many cycles
     task automatic test_random_stress();
         logic [WIDTH-1:0] prev_count;
         logic prev_en, prev_load;
@@ -380,7 +380,7 @@ module bnn_counter_tb;
         @(posedge clk);
     endtask
 
-    //--- Test 8 (Negative): Counter does NOT overflow past WIDTH bits ----------
+    // Counter does not overflow past WIDTH bits (negative test)
     task automatic test_no_overflow();
         $display("[TEST] test_no_overflow: max_val = all-ones");
         reset_dut();

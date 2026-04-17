@@ -1,4 +1,4 @@
-`timescale 1ns/1ps
+`timescale 1ns/10ps
 
 module bnn_input_buffer_tb;
 
@@ -88,7 +88,7 @@ module bnn_input_buffer_tb;
     //==========================================================================
 
     //--------------------------------------------------------------------------
-    // SVA-1: m_valid must hold until m_ready handshake (AXI-Stream Rule)
+    // m_valid must hold until m_ready handshake (AXI-Stream Rule)
     // RATIONALE: Once valid asserts, it cannot deassert until handshake.
     //--------------------------------------------------------------------------
     property p_m_valid_hold;
@@ -96,10 +96,10 @@ module bnn_input_buffer_tb;
         (m_valid && !m_ready) |=> m_valid;
     endproperty
     sva_m_valid_hold: assert property (p_m_valid_hold)
-        else $error("[SVA-1] m_valid dropped before m_ready handshake at t=%0t", $time);
+        else $error("[assertion] m_valid dropped before m_ready handshake at t=%0t", $time);
 
     //--------------------------------------------------------------------------
-    // SVA-2: m_data must be stable while m_valid && !m_ready
+    // m_data must be stable while m_valid && !m_ready
     // RATIONALE: Data must not change during a stalled handshake.
     //--------------------------------------------------------------------------
     property p_m_data_stable;
@@ -107,10 +107,10 @@ module bnn_input_buffer_tb;
         (m_valid && !m_ready) |=> $stable(m_data);
     endproperty
     sva_m_data_stable: assert property (p_m_data_stable)
-        else $error("[SVA-2] m_data changed during stall at t=%0t", $time);
+        else $error("[assertion] m_data changed during stall at t=%0t", $time);
 
     //--------------------------------------------------------------------------
-    // SVA-3: m_last must be stable while m_valid && !m_ready
+    // m_last must be stable while m_valid && !m_ready
     // RATIONALE: Last flag is part of the transfer and must remain stable.
     //--------------------------------------------------------------------------
     property p_m_last_stable;
@@ -118,10 +118,10 @@ module bnn_input_buffer_tb;
         (m_valid && !m_ready) |=> $stable(m_last);
     endproperty
     sva_m_last_stable: assert property (p_m_last_stable)
-        else $error("[SVA-3] m_last changed during stall at t=%0t", $time);
+        else $error("[assertion] m_last changed during stall at t=%0t", $time);
 
     //--------------------------------------------------------------------------
-    // SVA-4: s_valid must hold until s_ready handshake (Testbench Protocol)
+    // s_valid must hold until s_ready handshake (Testbench Protocol)
     // RATIONALE: Upstream protocol compliance. Disabled during negative tests.
     //--------------------------------------------------------------------------
     property p_s_valid_hold;
@@ -129,14 +129,14 @@ module bnn_input_buffer_tb;
         (s_valid && !s_ready) |=> s_valid;
     endproperty
     sva_s_valid_hold: assert property (p_s_valid_hold)
-        else $error("[SVA-4] s_valid dropped before s_ready handshake at t=%0t", $time);
+        else $error("[assertion] s_valid dropped before s_ready handshake at t=%0t", $time);
 
     //==========================================================================
     // SVA Properties — Category 2: Overflow / Underflow Protection
     //==========================================================================
 
     //--------------------------------------------------------------------------
-    // SVA-5: s_ready must be 0 when FIFO is full (Overflow Protection)
+    // s_ready must be 0 when FIFO is full (Overflow Protection)
     // RATIONALE: Full FIFO cannot accept more data.
     //--------------------------------------------------------------------------
     property p_no_overflow;
@@ -144,10 +144,10 @@ module bnn_input_buffer_tb;
         (count == DEPTH) |-> !s_ready;
     endproperty
     sva_no_overflow: assert property (p_no_overflow)
-        else $error("[SVA-5] s_ready high when full at t=%0t", $time);
+        else $error("[assertion] s_ready high when full at t=%0t", $time);
 
     //--------------------------------------------------------------------------
-    // SVA-6: m_valid must be 0 when FIFO is empty (Underflow Protection)
+    // m_valid must be 0 when FIFO is empty (Underflow Protection)
     // RATIONALE: Empty FIFO has no data to output.
     //--------------------------------------------------------------------------
     property p_no_underflow;
@@ -155,10 +155,10 @@ module bnn_input_buffer_tb;
         (count == 0) |-> !m_valid;
     endproperty
     sva_no_underflow: assert property (p_no_underflow)
-        else $error("[SVA-6] m_valid high when empty at t=%0t", $time);
+        else $error("[assertion] m_valid high when empty at t=%0t", $time);
 
     //--------------------------------------------------------------------------
-    // SVA-7: Fill counter must stay within bounds [0, DEPTH]
+    // Fill counter must stay within bounds [0, DEPTH]
     // RATIONALE: Counter overflow/underflow indicates logic error.
     //--------------------------------------------------------------------------
     property p_count_bounds;
@@ -166,14 +166,14 @@ module bnn_input_buffer_tb;
         (count <= DEPTH);
     endproperty
     sva_count_bounds: assert property (p_count_bounds)
-        else $error("[SVA-7] count=%0d out of bounds at t=%0t", count, $time);
+        else $error("[assertion] count=%0d out of bounds at t=%0t", count, $time);
 
     //==========================================================================
     // SVA Properties — Category 3: Timing Isolation (CRITICAL FOR fMAX)
     //==========================================================================
 
     //--------------------------------------------------------------------------
-    // SVA-8: s_ready is REGISTERED from fill counter (NOT combo from m_ready)
+    // s_ready is REGISTERED from fill counter (NOT combo from m_ready)
     // RATIONALE: s_ready at cycle N reflects fill state from cycle N-1.
     //            If s_ready were f(m_ready), timing closure would fail.
     // SCOPE: MUST PASS for 350+ MHz fMAX target.
@@ -183,10 +183,10 @@ module bnn_input_buffer_tb;
         s_ready == (count < DEPTH);
     endproperty
     sva_s_ready_registered: assert property (p_s_ready_registered)
-        else $error("[SVA-8] s_ready not registered from fill counter at t=%0t", $time);
+        else $error("[assertion] s_ready not registered from fill counter at t=%0t", $time);
 
     //--------------------------------------------------------------------------
-    // SVA-9: m_valid is REGISTERED from fill counter (NOT combo from s_valid)
+    // m_valid is REGISTERED from fill counter (NOT combo from s_valid)
     // RATIONALE: m_valid = REG(fill > 0). Same timing isolation requirement.
     // SCOPE: MUST PASS for 350+ MHz fMAX target.
     //--------------------------------------------------------------------------
@@ -195,14 +195,14 @@ module bnn_input_buffer_tb;
         m_valid == (count > 0);
     endproperty
     sva_m_valid_registered: assert property (p_m_valid_registered)
-        else $error("[SVA-9] m_valid not registered from fill counter at t=%0t", $time);
+        else $error("[assertion] m_valid not registered from fill counter at t=%0t", $time);
 
     //==========================================================================
     // SVA Properties — Category 4: Pointer Integrity
     //==========================================================================
 
     //--------------------------------------------------------------------------
-    // SVA-11: Write pointer wraps correctly at DEPTH-1
+    // Write pointer wraps correctly at DEPTH-1
     // RATIONALE: Pointer must wrap to 0, supporting non-power-of-2 DEPTH.
     //--------------------------------------------------------------------------
     property p_wr_ptr_wrap;
@@ -211,10 +211,10 @@ module bnn_input_buffer_tb;
             (DUT.wr_ptr_r_q == 0);
     endproperty
     sva_wr_ptr_wrap: assert property (p_wr_ptr_wrap)
-        else $error("[SVA-11] wr_ptr did not wrap correctly at t=%0t", $time);
+        else $error("[assertion] wr_ptr did not wrap correctly at t=%0t", $time);
 
     //--------------------------------------------------------------------------
-    // SVA-12: Read pointer wraps correctly at DEPTH-1
+    // Read pointer wraps correctly at DEPTH-1
     //--------------------------------------------------------------------------
     property p_rd_ptr_wrap;
         @(posedge clk) disable iff (rst)
@@ -222,10 +222,10 @@ module bnn_input_buffer_tb;
             (DUT.rd_ptr_r_q == 0);
     endproperty
     sva_rd_ptr_wrap: assert property (p_rd_ptr_wrap)
-        else $error("[SVA-12] rd_ptr did not wrap correctly at t=%0t", $time);
+        else $error("[assertion] rd_ptr did not wrap correctly at t=%0t", $time);
 
     //--------------------------------------------------------------------------
-    // SVA-13: Fill counter increments on write-only operation
+    // Fill counter increments on write-only operation
     //--------------------------------------------------------------------------
     property p_fill_increment;
         @(posedge clk) disable iff (rst)
@@ -233,10 +233,10 @@ module bnn_input_buffer_tb;
             (count == $past(count) + 1);
     endproperty
     sva_fill_increment: assert property (p_fill_increment)
-        else $error("[SVA-13] Fill counter did not increment on write-only at t=%0t", $time);
+        else $error("[assertion] Fill counter did not increment on write-only at t=%0t", $time);
 
     //--------------------------------------------------------------------------
-    // SVA-14: Fill counter decrements on read-only operation
+    // Fill counter decrements on read-only operation
     //--------------------------------------------------------------------------
     property p_fill_decrement;
         @(posedge clk) disable iff (rst)
@@ -244,10 +244,10 @@ module bnn_input_buffer_tb;
             (count == $past(count) - 1);
     endproperty
     sva_fill_decrement: assert property (p_fill_decrement)
-        else $error("[SVA-14] Fill counter did not decrement on read-only at t=%0t", $time);
+        else $error("[assertion] Fill counter did not decrement on read-only at t=%0t", $time);
 
     //--------------------------------------------------------------------------
-    // SVA-15: Fill counter holds on simultaneous read/write
+    // Fill counter holds on simultaneous read/write
     //--------------------------------------------------------------------------
     property p_fill_hold;
         @(posedge clk) disable iff (rst)
@@ -255,44 +255,45 @@ module bnn_input_buffer_tb;
             (count == $past(count));
     endproperty
     sva_fill_hold: assert property (p_fill_hold)
-        else $error("[SVA-15] Fill counter changed on simultaneous R/W at t=%0t", $time);
+        else $error("[assertion] Fill counter changed on simultaneous R/W at t=%0t", $time);
 
     //==========================================================================
     // SVA Properties — Category 5: Reset Behavior
     //==========================================================================
 
     //--------------------------------------------------------------------------
-    // SVA-16: s_ready is low during active reset
+    // s_ready is low during active reset
     //--------------------------------------------------------------------------
     property p_reset_s_ready;
         @(posedge clk)
         rst |=> !s_ready;
     endproperty
     sva_reset_s_ready: assert property (p_reset_s_ready)
-        else $error("[SVA-16] s_ready not low during reset at t=%0t", $time);
+        else $error("[assertion] s_ready not low during reset at t=%0t", $time);
 
     //--------------------------------------------------------------------------
-    // SVA-17: m_valid is low during active reset
+    // m_valid is low during active reset
     //--------------------------------------------------------------------------
     property p_reset_m_valid;
         @(posedge clk)
         rst |=> !m_valid;
     endproperty
     sva_reset_m_valid: assert property (p_reset_m_valid)
-        else $error("[SVA-17] m_valid not low during reset at t=%0t", $time);
+        else $error("[assertion] m_valid not low during reset at t=%0t", $time);
 
     //--------------------------------------------------------------------------
-    // SVA-18: Pointers reset to zero (checked one cycle after reset)
+    // Pointers reset to zero (checked one cycle after reset)
     //--------------------------------------------------------------------------
     property p_reset_pointers;
         @(posedge clk)
         rst |=> (DUT.wr_ptr_r_q == 0) && (DUT.rd_ptr_r_q == 0);
     endproperty
     sva_reset_pointers: assert property (p_reset_pointers)
-        else $error("[SVA-18] Pointers did not reset to zero at t=%0t", $time);
+        else $error("[assertion] Pointers did not reset to zero at t=%0t", $time);
 
     //==========================================================================
-    // Stall Counter (for covergroup cg_stall_duration)
+    // Stall Counter (for
+    covergroup cg_stall_duration)
     //==========================================================================
     int stall_counter;
 
@@ -309,7 +310,7 @@ module bnn_input_buffer_tb;
     // Covergroups
     //==========================================================================
 
-    //--- CG-1: Fill Level Coverage -------------------------------------------
+    // Fill Level Coverage
     covergroup cg_fill_levels @(posedge clk iff (!rst));
         option.per_instance = 1;
         option.at_least     = 5;
@@ -322,7 +323,7 @@ module bnn_input_buffer_tb;
         }
     endgroup
 
-    //--- CG-2: Read/Write Operations Cross Coverage --------------------------
+    // Read/Write Operations Cross Coverage
     covergroup cg_operations @(posedge clk iff (!rst));
         option.per_instance = 1;
         option.at_least     = 10;
@@ -342,7 +343,7 @@ module bnn_input_buffer_tb;
         }
     endgroup
 
-    //--- CG-3: Operations at Each Fill Level ---------------------------------
+    // Operations at Each Fill Level
     covergroup cg_fill_operations @(posedge clk iff (!rst));
         option.per_instance = 1;
         option.at_least     = 1;
@@ -366,7 +367,7 @@ module bnn_input_buffer_tb;
         }
     endgroup
 
-    //--- CG-4: Backpressure Scenarios ----------------------------------------
+    // Backpressure Scenarios
     covergroup cg_backpressure @(posedge clk iff (!rst));
         option.per_instance = 1;
         option.at_least     = 10;
@@ -383,7 +384,7 @@ module bnn_input_buffer_tb;
         }
     endgroup
 
-    //--- CG-5: s_last Propagation --------------------------------------------
+    // s_last Propagation
     covergroup cg_last_flag @(posedge clk iff (!rst));
         option.per_instance = 1;
         option.at_least     = 5;
@@ -402,7 +403,7 @@ module bnn_input_buffer_tb;
         }
     endgroup
 
-    //--- CG-6: Pointer Wrap Events -------------------------------------------
+    // Pointer Wrap Events
     covergroup cg_pointer_wrap @(posedge clk iff (!rst));
         option.per_instance = 1;
         option.at_least     = 3;
@@ -418,7 +419,7 @@ module bnn_input_buffer_tb;
         }
     endgroup
 
-    //--- CG-7: Consecutive Stall Cycles (Stress Coverage) --------------------
+    // Consecutive Stall Cycles (Stress Coverage)
     covergroup cg_stall_duration @(posedge clk iff (!rst));
         option.per_instance = 1;
         cp_output_stall_cycles: coverpoint stall_counter {
@@ -548,7 +549,7 @@ module bnn_input_buffer_tb;
     //==========================================================================
     //==========================================================================
 
-    //--- 1.1: Single Write Then Read -----------------------------------------
+    // Single Write Then Read
     task automatic test_single_write_read();
         logic [WIDTH-1:0] rdata;
         logic rlast;
@@ -570,7 +571,7 @@ module bnn_input_buffer_tb;
         report_test("1.1 Single Write/Read", test_errors);
     endtask
 
-    //--- 1.2: Fill to Capacity -----------------------------------------------
+    // Fill to Capacity
     task automatic test_fill_to_capacity();
         test_errors = 0;
         reset_dut();
@@ -595,7 +596,7 @@ module bnn_input_buffer_tb;
         report_test("1.2 Fill to Capacity", test_errors);
     endtask
 
-    //--- 1.3: Drain from Full ------------------------------------------------
+    // Drain from Full
     task automatic test_drain_from_full();
         test_errors = 0;
         reset_dut();
@@ -621,7 +622,7 @@ module bnn_input_buffer_tb;
         report_test("1.3 Drain from Full", test_errors);
     endtask
 
-    //--- 1.4: Simultaneous Read/Write ----------------------------------------
+    // Simultaneous Read/Write
     task automatic test_simultaneous_rw();
         logic [CNT_W-1:0] fill_before;
         test_errors = 0;
@@ -649,7 +650,7 @@ module bnn_input_buffer_tb;
         s_last  <= 1'b0;
         m_ready <= 1'b0;
 
-        // Check fill counter held (SVA-15 also verifies this)
+        // Check fill counter held (assertion also verifies this)
         @(posedge clk);
         if (count !== fill_before) begin
             $error("[T1.4] Fill changed on simultaneous R/W: before=%0d after=%0d",
@@ -668,7 +669,7 @@ module bnn_input_buffer_tb;
     //==========================================================================
     //==========================================================================
 
-    //--- 2.1: Single Byte Image (s_last on first beat) -----------------------
+    // Single Byte Image (s_last on first beat)
     task automatic test_single_byte_image();
         logic [WIDTH-1:0] rdata;
         logic rlast;
@@ -686,7 +687,7 @@ module bnn_input_buffer_tb;
         report_test("2.1 Single Byte Image", test_errors);
     endtask
 
-    //--- 2.2: Maximum Size Image (s_last only on final beat) -----------------
+    // Maximum Size Image (s_last only on final beat)
     task automatic test_max_size_image();
         logic [WIDTH-1:0] rdata;
         logic rlast;
@@ -713,7 +714,7 @@ module bnn_input_buffer_tb;
         report_test("2.2 Maximum Size Image", test_errors);
     endtask
 
-    //--- 2.3: Random Gaps Between Images -------------------------------------
+    // Random Gaps Between Images
     task automatic test_random_gaps();
         logic [WIDTH-1:0] rdata;
         logic rlast;
@@ -755,7 +756,7 @@ module bnn_input_buffer_tb;
     //==========================================================================
     //==========================================================================
 
-    //--- 3.1: Sustained Output Backpressure ----------------------------------
+    // Sustained Output Backpressure
     task automatic test_sustained_output_bp();
         logic [WIDTH-1:0] captured_data;
         logic             captured_last;
@@ -790,7 +791,7 @@ module bnn_input_buffer_tb;
         report_test("3.1 Sustained Output Backpressure", test_errors);
     endtask
 
-    //--- 3.2: Contest-Style Backpressure (80% m_ready) -----------------------
+    // Contest-Style Backpressure (80% m_ready)
     task automatic test_contest_backpressure();
         int num_sent = 0;
         int num_recv = 0;
@@ -834,13 +835,13 @@ module bnn_input_buffer_tb;
     //==========================================================================
     //==========================================================================
 
-    //--- NEG-1: s_valid drops before s_ready (protocol violation) ------------
+    // s_valid drops before s_ready (protocol violation)
     task automatic test_neg_valid_drop();
         logic [WIDTH-1:0] rdata;
         logic rlast;
         test_errors = 0;
         reset_dut();
-        $display("[NEG-1] Testing upstream valid-drop violation");
+        $display("[check] Testing upstream valid-drop violation");
 
         // Fill FIFO to capacity → s_ready = 0
         for (int i = 0; i < DEPTH; i++)
@@ -848,7 +849,7 @@ module bnn_input_buffer_tb;
 
         repeat(2) @(posedge clk);
 
-        // Disable SVA-4 — we are deliberately violating protocol
+        // Disable assertion — we are deliberately violating protocol
         $assertoff(0, sva_s_valid_hold);
 
         @(posedge clk);
@@ -865,7 +866,7 @@ module bnn_input_buffer_tb;
         for (int i = 0; i < DEPTH; i++) begin
             recv_one(rdata, rlast);
             if (rdata !== WIDTH'(i)) begin
-                $error("[NEG-1] Data corruption: exp=0x%h got=0x%h at idx %0d",
+                $error("[check] Data corruption: exp=0x%h got=0x%h at idx %0d",
                        WIDTH'(i), rdata, i);
                 test_errors++;
             end
@@ -874,13 +875,13 @@ module bnn_input_buffer_tb;
         report_test("NEG-1 Valid Drop Violation", test_errors);
     endtask
 
-    //--- NEG-2: Overflow Stress (s_valid while full) -------------------------
+    // Overflow Stress (s_valid while full)
     task automatic test_neg_overflow_stress();
         logic [WIDTH-1:0] rdata;
         logic rlast;
         test_errors = 0;
         reset_dut();
-        $display("[NEG-2] Testing overflow stress");
+        $display("[check] Testing overflow stress");
 
         // Fill to DEPTH
         for (int i = 0; i < DEPTH; i++)
@@ -898,7 +899,7 @@ module bnn_input_buffer_tb;
         for (int cyc = 0; cyc < 15; cyc++) begin
             @(posedge clk);
             if (count > CNT_W'(DEPTH)) begin
-                $error("[NEG-2] Overflow: count=%0d > DEPTH=%0d", count, DEPTH);
+                $error("[check] Overflow: count=%0d > DEPTH=%0d", count, DEPTH);
                 test_errors++;
             end
         end
@@ -911,7 +912,7 @@ module bnn_input_buffer_tb;
         for (int i = 0; i < DEPTH; i++) begin
             recv_one(rdata, rlast);
             if (rdata !== WIDTH'(i + 1)) begin
-                $error("[NEG-2] Data corruption: exp=0x%h got=0x%h", WIDTH'(i+1), rdata);
+                $error("[check] Data corruption: exp=0x%h got=0x%h", WIDTH'(i+1), rdata);
                 test_errors++;
             end
         end
@@ -919,12 +920,12 @@ module bnn_input_buffer_tb;
         report_test("NEG-2 Overflow Stress", test_errors);
     endtask
 
-    //--- NEG-3: Force m_data change during stall (SVA-2 trigger) -------------
+    // Force m_data change during stall (assertion trigger)
     task automatic test_neg_data_stability();
         test_errors  = 0;
         sb_check_en  = 0;              // Disable scoreboard — memory is corrupted
         reset_dut();
-        $display("[NEG-3] Testing data stability violation (force)");
+        $display("[check] Testing data stability violation (force)");
 
         // Write known data
         send_one(8'hAA, 1'b0);
@@ -932,7 +933,7 @@ module bnn_input_buffer_tb;
         // Wait for m_valid to assert, hold m_ready = 0
         repeat(3) @(posedge clk);
 
-        // Expect SVA-2/SVA-3 to fire — disable to avoid noise
+        // Expect assertion/assertion to fire — disable to avoid noise
         $assertoff(0, sva_m_data_stable);
         $assertoff(0, sva_m_last_stable);
 
@@ -952,13 +953,13 @@ module bnn_input_buffer_tb;
         report_test("NEG-3 Data Stability Violation (force)", test_errors);
     endtask
 
-    //--- NEG-4: Reset During Active Burst ------------------------------------
+    // Reset During Active Burst
     task automatic test_neg_reset_mid_burst();
         test_errors = 0;
         reset_dut();
-        $display("[NEG-4] Testing reset during active burst");
+        $display("[check] Testing reset during active burst");
 
-        // Disable reset SVA-18 |=> check to avoid edge-case noise
+        // Disable reset assertion |=> check to avoid edge-case noise
         $assertoff(0, sva_reset_pointers);
 
         fork
@@ -987,11 +988,11 @@ module bnn_input_buffer_tb;
         @(posedge clk);
 
         if (s_ready !== 1'b0) begin
-            $error("[NEG-4] s_ready not low during reset");
+            $error("[check] s_ready not low during reset");
             test_errors++;
         end
         if (m_valid !== 1'b0) begin
-            $error("[NEG-4] m_valid not low during reset");
+            $error("[check] m_valid not low during reset");
             test_errors++;
         end
 
@@ -1005,7 +1006,7 @@ module bnn_input_buffer_tb;
 
         // Verify clean state after recovery
         if (count !== '0) begin
-            $error("[NEG-4] count not zero after reset: %0d", count);
+            $error("[check] count not zero after reset: %0d", count);
             test_errors++;
         end
 
@@ -1018,12 +1019,12 @@ module bnn_input_buffer_tb;
     //==========================================================================
     //==========================================================================
 
-    //--- CHK-1: Force data corruption, verify scoreboard catches it ----------
+    // Force data corruption, verify scoreboard catches it
     task automatic test_checker_scoreboard_mismatch();
         int sb_fail_before;
         test_errors = 0;
         reset_dut();
-        $display("[CHK-1] Testing scoreboard mismatch detection");
+        $display("[check] Testing scoreboard mismatch detection");
 
         sb_fail_before = sb_fail;
 
@@ -1051,10 +1052,10 @@ module bnn_input_buffer_tb;
 
         // Verify scoreboard DID detect the corruption
         if (sb_fail > sb_fail_before) begin
-            $display("[CHK-1] Scoreboard correctly detected data corruption (expected)");
+            $display("[check] Scoreboard correctly detected data corruption (expected)");
             expected_sb_fail += (sb_fail - sb_fail_before);
         end else begin
-            $error("[CHK-1] Scoreboard did NOT detect data corruption!");
+            $error("[check] Scoreboard did NOT detect data corruption!");
             test_errors++;
         end
 
@@ -1062,12 +1063,12 @@ module bnn_input_buffer_tb;
         report_test("CHK-1 Scoreboard Mismatch", test_errors);
     endtask
 
-    //--- CHK-2: Force m_valid stuck low when FIFO has data -------------------
+    // Force m_valid stuck low when FIFO has data
     task automatic test_checker_handshake_hang();
         test_errors  = 0;
         sb_check_en  = 0;
         reset_dut();
-        $display("[CHK-2] Testing handshake hang detection");
+        $display("[check] Testing handshake hang detection");
 
         // Write data to FIFO
         send_one(8'h55, 1'b0);
@@ -1091,12 +1092,12 @@ module bnn_input_buffer_tb;
         report_test("CHK-2 Handshake Hang", test_errors);
     endtask
 
-    //--- CHK-3: Force wr_ptr to skip address ---------------------------------
+    // Force wr_ptr to skip address
     task automatic test_checker_pointer_desync();
         test_errors  = 0;
         sb_check_en  = 0;
         reset_dut();
-        $display("[CHK-3] Testing pointer desync detection");
+        $display("[check] Testing pointer desync detection");
 
         // Write first item normally
         send_one(8'h01, 1'b0);
@@ -1128,8 +1129,7 @@ module bnn_input_buffer_tb;
     //==========================================================================
     //==========================================================================
 
-    //--- TEST-A: Timing Isolation (CRITICAL — validates core purpose) --------
-    // PURPOSE: Prove ZERO combinational path between m_ready↔s_ready
+    // Timing Isolation (CRITICAL — validates core purpose)    // PURPOSE: Prove ZERO combinational path between m_ready↔s_ready
     //          and s_valid↔m_valid. If this fails, fMAX will not meet the
     //          350+ MHz contest target.
     task automatic test_timing_isolation();
@@ -1137,7 +1137,7 @@ module bnn_input_buffer_tb;
         logic m_valid_before, m_valid_after;
         test_errors = 0;
         reset_dut();
-        $display("[TEST-A] Timing isolation verification");
+        $display("[check] Timing isolation verification");
 
         // Fill to 2 entries (both interfaces active)
         send_one(8'hAA, 1'b0);
@@ -1160,11 +1160,11 @@ module bnn_input_buffer_tb;
         s_ready_after = s_ready;
 
         if (s_ready_before !== s_ready_after) begin
-            $error("[TEST-A] FAIL: s_ready changed when m_ready toggled!");
+            $error("[check] FAIL: s_ready changed when m_ready toggled!");
             $error("         COMBINATIONAL PATH detected — hurts fMAX!");
             test_errors++;
         end else begin
-            $display("[TEST-A] PASS: s_ready is registered (no combo path from m_ready)");
+            $display("[check] PASS: s_ready is registered (no combo path from m_ready)");
         end
 
         m_ready = 1'b0;
@@ -1182,11 +1182,11 @@ module bnn_input_buffer_tb;
         m_valid_after = m_valid;
 
         if (m_valid_before !== m_valid_after) begin
-            $error("[TEST-A] FAIL: m_valid changed when s_valid toggled!");
+            $error("[check] FAIL: m_valid changed when s_valid toggled!");
             $error("         COMBINATIONAL PATH detected — hurts fMAX!");
             test_errors++;
         end else begin
-            $display("[TEST-A] PASS: m_valid is registered (no combo path from s_valid)");
+            $display("[check] PASS: m_valid is registered (no combo path from s_valid)");
         end
 
         s_valid = 1'b0;
@@ -1197,8 +1197,7 @@ module bnn_input_buffer_tb;
         report_test("TEST-A Timing Isolation (CRITICAL)", test_errors);
     endtask
 
-    //--- TEST-C: s_last Alignment Stress -------------------------------------
-    // PURPOSE: Verify m_last never shifts to wrong data beat across variable-
+    // s_last Alignment Stress    // PURPOSE: Verify m_last never shifts to wrong data beat across variable-
     //          length images and random inter-packet gaps.
     task automatic test_s_last_alignment_stress();
         logic [WIDTH-1:0] rdata;
@@ -1206,7 +1205,7 @@ module bnn_input_buffer_tb;
         int image_sizes[] = '{1, 2, 3, 4, 7, 8, 15, 16};
         test_errors = 0;
         reset_dut();
-        $display("[TEST-C] s_last alignment stress");
+        $display("[check] s_last alignment stress");
 
         for (int img = 0; img < image_sizes.size(); img++) begin
             automatic int sz = image_sizes[img];
@@ -1222,13 +1221,13 @@ module bnn_input_buffer_tb;
                         recv_one(rdata, rlast);
                         if (j == sz - 1) begin
                             if (rlast !== 1'b1) begin
-                                $error("[TEST-C] m_last not set on final beat of image %0d (size=%0d)",
+                                $error("[check] m_last not set on final beat of image %0d (size=%0d)",
                                        img, sz);
                                 test_errors++;
                             end
                         end else begin
                             if (rlast !== 1'b0) begin
-                                $error("[TEST-C] Spurious m_last on beat %0d of image %0d", j, img);
+                                $error("[check] Spurious m_last on beat %0d of image %0d", j, img);
                                 test_errors++;
                             end
                         end
@@ -1243,14 +1242,13 @@ module bnn_input_buffer_tb;
         report_test("TEST-C s_last Alignment Stress", test_errors);
     endtask
 
-    //--- TEST-D: X-Value Propagation Check -----------------------------------
-    // PURPOSE: Verify X values on s_data when s_valid=0 don't corrupt FIFO.
+    // X-Value Propagation Check    // PURPOSE: Verify X values on s_data when s_valid=0 don't corrupt FIFO.
     task automatic test_x_propagation();
         logic [WIDTH-1:0] rdata;
         logic rlast;
         test_errors = 0;
         reset_dut();
-        $display("[TEST-D] X-value propagation check");
+        $display("[check] X-value propagation check");
 
         // Write valid data
         send_one(8'hAA, 1'b0);
@@ -1268,21 +1266,21 @@ module bnn_input_buffer_tb;
         // Read both items — verify no X contamination
         recv_one(rdata, rlast);
         if (rdata !== 8'hAA) begin
-            $error("[TEST-D] First read corrupted: exp=0xAA got=0x%h", rdata);
+            $error("[check] First read corrupted: exp=0xAA got=0x%h", rdata);
             test_errors++;
         end
         if ($isunknown(rdata)) begin
-            $error("[TEST-D] X contamination detected in first read!");
+            $error("[check] X contamination detected in first read!");
             test_errors++;
         end
 
         recv_one(rdata, rlast);
         if (rdata !== 8'hBB) begin
-            $error("[TEST-D] Second read corrupted: exp=0xBB got=0x%h", rdata);
+            $error("[check] Second read corrupted: exp=0xBB got=0x%h", rdata);
             test_errors++;
         end
         if ($isunknown(rdata)) begin
-            $error("[TEST-D] X contamination detected in second read!");
+            $error("[check] X contamination detected in second read!");
             test_errors++;
         end
 

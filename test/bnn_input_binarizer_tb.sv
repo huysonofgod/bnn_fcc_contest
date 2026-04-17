@@ -63,7 +63,7 @@ module bnn_input_binarizer_tb;
         (m_valid && !m_ready) |=> m_valid;
     endproperty
     assert property (p_m_valid_hold)
-    else $error("[SVA-1] FAIL: m_valid dropped without m_ready handshake");
+    else $error("[assertion] FAIL: m_valid dropped without m_ready handshake");
 
     //--------------------------------------------------------------------------
     // m_data stable during backpressure -- when m_valid && !m_ready,
@@ -74,7 +74,7 @@ module bnn_input_binarizer_tb;
         (m_valid && !m_ready) |=> $stable(m_data);
     endproperty
     assert property (p_m_data_stable)
-    else $error("[SVA-2] FAIL: m_data changed during backpressure");
+    else $error("[assertion] FAIL: m_data changed during backpressure");
 
     //--------------------------------------------------------------------------
     // 1-cycle pipeline latency (skid buffer) -- when a slave handshake
@@ -85,7 +85,7 @@ module bnn_input_binarizer_tb;
         (s_valid && s_ready) |=> m_valid;
     endproperty
     assert property (p_pipeline_latency)
-    else $error("[SVA-3] FAIL: m_valid not asserted 1 cycle after s handshake");
+    else $error("[assertion] FAIL: m_valid not asserted 1 cycle after s handshake");
 
     //--------------------------------------------------------------------------
     // m_last follows s_last by 1 cycle -- when a beat with s_last=1
@@ -96,7 +96,7 @@ module bnn_input_binarizer_tb;
         (s_valid && s_ready && s_last) |=> m_last;
     endproperty
     assert property (p_last_propagation)
-    else $error("[SVA-4] FAIL: m_last did not follow s_last by 1 cycle");
+    else $error("[assertion] FAIL: m_last did not follow s_last by 1 cycle");
 
     //--------------------------------------------------------------------------
     // m_last stable during backpressure
@@ -107,7 +107,7 @@ module bnn_input_binarizer_tb;
         (m_valid && !m_ready) |=> $stable(m_last);
     endproperty
     assert property (p_m_last_stable)
-    else $error("[SVA-5] FAIL: m_last changed during backpressure");
+    else $error("[assertion] FAIL: m_last changed during backpressure");
 
     //==========================================================================
     // Reference Model: Binarization
@@ -245,7 +245,7 @@ module bnn_input_binarizer_tb;
     // Test Scenarios
     //==========================================================================
 
-    //--- Test 1: Threshold boundary -- pixels at 127, 128, 129 ----------------
+    // Threshold boundary -- pixels at 127, 128, 129
     task automatic test_threshold_boundary();
         logic [63:0] data;
         $display("[TEST] test_threshold_boundary");
@@ -267,7 +267,7 @@ module bnn_input_binarizer_tb;
         repeat (5) @(posedge clk);
     endtask
 
-    //--- Test 2: All zeros -- 64-bit bus all pixels < 128 ----------------------
+    // All zeros -- 64-bit bus all pixels < 128
     task automatic test_all_zeros();
         $display("[TEST] test_all_zeros");
         m_ready <= 1'b1;
@@ -275,7 +275,7 @@ module bnn_input_binarizer_tb;
         repeat (5) @(posedge clk);
     endtask
 
-    //--- Test 3: All ones -- 64-bit bus all pixels >= 128 ----------------------
+    // All ones -- 64-bit bus all pixels >= 128
     task automatic test_all_ones();
         $display("[TEST] test_all_ones");
         m_ready <= 1'b1;
@@ -283,7 +283,7 @@ module bnn_input_binarizer_tb;
         repeat (5) @(posedge clk);
     endtask
 
-    //--- Test 4: Mixed patterns ------------------------------------------------
+    // Mixed patterns
     task automatic test_mixed_patterns();
         logic [63:0] data;
         $display("[TEST] test_mixed_patterns");
@@ -299,7 +299,7 @@ module bnn_input_binarizer_tb;
         repeat (5) @(posedge clk);
     endtask
 
-    //--- Test 5: s_keep patterns -- all valid, none valid, partial ------------
+    // s_keep patterns -- all valid, none valid, partial
     task automatic test_keep_patterns();
         $display("[TEST] test_keep_patterns");
         m_ready <= 1'b1;
@@ -318,7 +318,7 @@ module bnn_input_binarizer_tb;
         repeat (5) @(posedge clk);
     endtask
 
-    //--- Test 6: Backpressure -- m_ready toggling -----------------------------
+    // Backpressure -- m_ready toggling
     task automatic test_backpressure();
         $display("[TEST] test_backpressure: toggling m_ready");
 
@@ -338,7 +338,7 @@ module bnn_input_binarizer_tb;
         repeat (10) @(posedge clk);
     endtask
 
-    //--- Test 7: s_last propagation -- verify 1-cycle delay -------------------
+    // s_last propagation -- verify 1-cycle delay
     task automatic test_last_propagation();
         $display("[TEST] test_last_propagation");
         m_ready <= 1'b1;
@@ -350,7 +350,7 @@ module bnn_input_binarizer_tb;
         repeat (5) @(posedge clk);
     endtask
 
-    //--- Test 8: Random stress -- 200 random beats ----------------------------
+    // Random stress -- 200 random beats
     task automatic test_random_stress();
         int num_beats = 200;
         $display("[TEST] test_random_stress: %0d beats", num_beats);

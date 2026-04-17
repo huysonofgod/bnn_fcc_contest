@@ -156,12 +156,12 @@ module neuron_processor_tb_worker #(
             (!dut.u_fsm.acc_we && !$isunknown(dut.u_dp.acc_r_q)) |=> (dut.u_dp.acc_r_q == $past(dut.u_dp.acc_r_q));
     endproperty
 
-    // SVA-7: valid_out is only legal while FSM is in RESET state.
+    // valid_out is only legal while FSM is in RESET state.
     property p_valid_out_only_in_reset;
         @(posedge clk) disable iff (rst) valid_out |-> (dut.u_fsm.state_r == FSM_RESET);
     endproperty
 
-    // SVA-8: RESET state must transition back to IDLE on the next cycle.
+    // RESET state must transition back to IDLE on the next cycle.
     property p_reset_exits_to_idle;
         @(posedge clk) disable iff (rst) 
             (dut.u_fsm.state_r == FSM_RESET) |=> (dut.u_fsm.state_r == FSM_IDLE);

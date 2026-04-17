@@ -54,7 +54,7 @@ module bnn_byte_filter_tb;
     //==========================================================================
 
     //--------------------------------------------------------------------------
-    // SVA-1: After entering SERIALIZE, byte index eventually reaches 7.
+    // After entering SERIALIZE, byte index eventually reaches 7.
     // RATIONALE: the design must iterate all byte positions (0..7); stalls may
     // extend total cycles under backpressure, so this uses a bounded eventuality.
     //--------------------------------------------------------------------------
@@ -65,10 +65,10 @@ module bnn_byte_filter_tb;
                       (DUT.u_dp.byte_idx_r_q == 3'd7));
     endproperty
     assert property (p_serialize_duration)
-    else $error("[SVA-1] FAIL: serialize did not complete in 8 cycles");
+    else $error("[assertion] FAIL: serialize did not complete in 8 cycles");
 
     //--------------------------------------------------------------------------
-    // SVA-2: m_valid = keep_bit when in SERIALIZE -- valid output is directly
+    // m_valid = keep_bit when in SERIALIZE -- valid output is directly
     // gated by the captured keep bit at the current byte index.
     // RATIONALE: Invalid bytes (keep=0) must produce m_valid=0.
     //--------------------------------------------------------------------------
@@ -78,10 +78,10 @@ module bnn_byte_filter_tb;
             (m_valid == (DUT.u_dp.keep_r_q[DUT.u_dp.byte_idx_r_q] & DUT.u_fsm.in_serialize));
     endproperty
     assert property (p_m_valid_follows_keep)
-    else $error("[SVA-2] FAIL: m_valid does not match keep bit in SERIALIZE");
+    else $error("[assertion] FAIL: m_valid does not match keep bit in SERIALIZE");
 
     //--------------------------------------------------------------------------
-    // SVA-3: m_last only on last valid byte -- m_last asserts only when the
+    // m_last only on last valid byte -- m_last asserts only when the
     // byte index matches last_valid_idx and the captured s_last was high.
     // RATIONALE: m_last marks the final valid byte of the entire stream.
     //--------------------------------------------------------------------------
@@ -91,10 +91,10 @@ module bnn_byte_filter_tb;
                     DUT.u_dp.byte_idx_r_q == DUT.u_dp.last_valid_idx_r_q);
     endproperty
     assert property (p_m_last_on_last_valid)
-    else $error("[SVA-3] FAIL: m_last asserted at wrong byte index");
+    else $error("[assertion] FAIL: m_last asserted at wrong byte index");
 
     //--------------------------------------------------------------------------
-    // SVA-4: AXI-Stream valid-hold when m_valid && !m_ready -- data and valid
+    // AXI-Stream valid-hold when m_valid && !m_ready -- data and valid
     // must remain stable during backpressure.
     // RATIONALE: AXI4-Stream protocol compliance.
     // NOTE: This module has combinational m_valid tied to FSM state. The FSM
@@ -106,10 +106,10 @@ module bnn_byte_filter_tb;
         (m_valid && !m_ready) |=> (m_valid && $stable(m_data));
     endproperty
     assert property (p_m_valid_hold)
-    else $error("[SVA-4] FAIL: m_valid/m_data changed during backpressure");
+    else $error("[assertion] FAIL: m_valid/m_data changed during backpressure");
 
     //--------------------------------------------------------------------------
-    // SVA-5: s_ready only in EMPTY state -- upstream cannot push data while
+    // s_ready only in EMPTY state -- upstream cannot push data while
     // the byte filter is serializing.
     // RATIONALE: Prevents data corruption from accepting a new word mid-serialize.
     //--------------------------------------------------------------------------
@@ -118,7 +118,7 @@ module bnn_byte_filter_tb;
         s_ready |-> (DUT.u_fsm.state_r == DUT.u_fsm.EMPTY);
     endproperty
     assert property (p_s_ready_only_empty)
-    else $error("[SVA-5] FAIL: s_ready asserted outside EMPTY state");
+    else $error("[assertion] FAIL: s_ready asserted outside EMPTY state");
 
     //==========================================================================
     // Covergroups
@@ -294,7 +294,7 @@ module bnn_byte_filter_tb;
     // Test Scenarios
     //==========================================================================
 
-    //--- Test 1: All bytes valid (s_keep=0xFF) --------------------------------
+    // All bytes valid (s_keep=0xFF)
     task automatic test_all_valid();
         $display("[TEST] test_all_valid: keep=0xFF");
         m_ready <= 1'b1;
@@ -302,7 +302,7 @@ module bnn_byte_filter_tb;
         drain_word();
     endtask
 
-    //--- Test 2: No bytes valid (s_keep=0x00, edge case) ----------------------
+    // No bytes valid (s_keep=0x00, edge case)
     task automatic test_no_valid();
         $display("[TEST] test_no_valid: keep=0x00 (edge case)");
         m_ready <= 1'b1;
@@ -313,7 +313,7 @@ module bnn_byte_filter_tb;
         drain_word();
     endtask
 
-    //--- Test 3: Single byte patterns -- test each single-bit s_keep ----------
+    // Single byte patterns -- test each single-bit s_keep
     task automatic test_single_byte_patterns();
         $display("[TEST] test_single_byte_patterns");
         m_ready <= 1'b1;
@@ -328,7 +328,7 @@ module bnn_byte_filter_tb;
         end
     endtask
 
-    //--- Test 4: Alternating patterns (0xAA, 0x55) ----------------------------
+    // Alternating patterns (0xAA, 0x55)
     task automatic test_alternating();
         $display("[TEST] test_alternating: keep=0xAA then 0x55");
         m_ready <= 1'b1;
@@ -338,7 +338,7 @@ module bnn_byte_filter_tb;
         drain_word();
     endtask
 
-    //--- Test 5: s_last at various positions -- last_valid_idx calculation -----
+    // s_last at various positions -- last_valid_idx calculation
     task automatic test_last_positions();
         $display("[TEST] test_last_positions: verify last_valid_idx");
         m_ready <= 1'b1;
@@ -360,7 +360,7 @@ module bnn_byte_filter_tb;
         drain_word();
     endtask
 
-    //--- Test 6: Backpressure during serialize -- m_ready toggling ------------
+    // Backpressure during serialize -- m_ready toggling
     task automatic test_backpressure();
         $display("[TEST] test_backpressure: toggling m_ready");
         send_word(64'h0102030405060708, 8'hFF, 1'b1);
@@ -374,7 +374,7 @@ module bnn_byte_filter_tb;
         repeat (20) @(posedge clk);
     endtask
 
-    //--- Test 7: Back-to-back words -- continuous word stream ------------------
+    // Back-to-back words -- continuous word stream
     task automatic test_back_to_back();
         $display("[TEST] test_back_to_back: 10 consecutive words");
         m_ready <= 1'b1;
@@ -388,7 +388,7 @@ module bnn_byte_filter_tb;
         end
     endtask
 
-    //--- Test 8: Random stress -- 100 words with random keep/data ------------
+    // Random stress -- 100 words with random keep/data
     task automatic test_random_stress();
         int num_words = 100;
         $display("[TEST] test_random_stress: %0d words", num_words);
