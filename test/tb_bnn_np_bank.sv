@@ -1,4 +1,7 @@
-`timescale 1ns/10ps
+module directory pulls in:
+//   bnn_fanout_buf, neuron_processor, NP_datapath, NP_fsm
+//
+`timescale 1ns/100ps
 
 `ifndef NPBANK_TB_P_W
 `define NPBANK_TB_P_W 8
@@ -116,7 +119,7 @@ module tb_bnn_np_bank;
                 DUT.np_valid_lane[0] === DUT.np_valid_lane[gk];
             endproperty
             assert property (p_lane_align)
-            else $error("[assertion] lane[0].valid=%0b != lane[%0d].valid=%0b",
+            else $error("[SVA] FAIL a_lane_align: lane[0].valid=%0b != lane[%0d].valid=%0b",
                         DUT.np_valid_lane[0], gk, DUT.np_valid_lane[gk]);
         end
     endgenerate
@@ -129,7 +132,7 @@ module tb_bnn_np_bank;
         np_valid_out |-> (!$isunknown(y_out) && !$isunknown(score_out));
     endproperty
     assert property (p_no_x_on_valid_out)
-    else $error("[assertion] FAIL: X on y_out or score_out when np_valid_out=1");
+    else $error("[SVA] FAIL: X on y_out or score_out when np_valid_out=1");
 
     //==========================================================================
     // Covergroups
@@ -333,13 +336,13 @@ module tb_bnn_np_bank;
     endtask
 
     //==========================================================================
-    // €” Single image, all lanes same weights and inputs
+    //T01 â€” Single image, all lanes same weights and inputs
     //==========================================================================
     task automatic test_t01_uniform();
         logic [P_W-1:0]   xv[ITERS];
         logic [P_W-1:0]   wm[P_N][ITERS];
         logic [ACC_W-1:0] tv[P_N];
-        $display("[test] uniform image, all lanes identical");
+        $display("[TEST] T01: uniform image, all lanes identical");
         reset_dut();
         // All inputs = 0xFF, all weights = 0xFF â†’ XNOR = 0xFF â†’ popcount = P_W per beat
         // Total accum = P_W * ITERS = FAN_IN; threshold = FAN_IN/2 â†’ activation = 1
@@ -349,13 +352,13 @@ module tb_bnn_np_bank;
     endtask
 
     //==========================================================================
-    // €” Per-lane unique weights; hidden mode
+    // T02 â€” Per-lane unique weights; hidden mode
     //==========================================================================
     task automatic test_t02_unique_lanes();
         logic [P_W-1:0]   xv[ITERS];
         logic [P_W-1:0]   wm[P_N][ITERS];
         logic [ACC_W-1:0] tv[P_N];
-        $display("[test] per-lane unique weights, hidden mode");
+        $display("[TEST] T02: per-lane unique weights, hidden mode");
         reset_dut();
         // Each lane has a different weight pattern to produce different popcounts
         for (int i = 0; i < ITERS; i++) xv[i] = P_W'($urandom());
@@ -368,13 +371,13 @@ module tb_bnn_np_bank;
     endtask
 
     //==========================================================================
-    // €” Hidden mode: threshold sweep (all activate vs none activate)
+    // T03 â€” Hidden mode: threshold sweep (all activate vs none activate)
     //==========================================================================
     task automatic test_t03_threshold_sweep();
         logic [P_W-1:0]   xv[ITERS];
         logic [P_W-1:0]   wm[P_N][ITERS];
         logic [ACC_W-1:0] tv[P_N];
-        $display("[test] hidden mode threshold sweep");
+        $display("[TEST] T03: hidden mode threshold sweep");
         reset_dut();
 
         // All-ones input and all-ones weights â†’ maximum popcount = FAN_IN
@@ -396,13 +399,13 @@ module tb_bnn_np_bank;
     endtask
 
     //==========================================================================
-    // €” Output mode: raw popcount preserved, threshold irrelevant
+    // T04 â€” Output mode: raw popcount preserved, threshold irrelevant
     //==========================================================================
     task automatic test_t04_output_mode();
         logic [P_W-1:0]   xv[ITERS];
         logic [P_W-1:0]   wm[P_N][ITERS];
         logic [ACC_W-1:0] tv[P_N];
-        $display("[test] output mode, score_out = raw popcount");
+        $display("[TEST] T04: output mode, score_out = raw popcount");
         reset_dut();
         for (int i = 0; i < ITERS; i++) xv[i] = P_W'($urandom());
         for (int j = 0; j < P_N; j++) begin
@@ -414,7 +417,7 @@ module tb_bnn_np_bank;
     endtask
 
     //==========================================================================
-    // €” FANOUT_STAGES latency invariance
+    // T05 â€” FANOUT_STAGES latency invariance
     // The TB is compiled for a specific FANOUT_STAGES. Run two images and
     // verify both produce correct results (the fan-out latency is transparent
     // to the golden model since we wait for np_valid_out each time).
@@ -423,7 +426,7 @@ module tb_bnn_np_bank;
         logic [P_W-1:0]   xv[ITERS];
         logic [P_W-1:0]   wm[P_N][ITERS];
         logic [ACC_W-1:0] tv[P_N];
-        $display("[test] FANOUT_STAGES=%0d latency invariance", FANOUT_STAGES);
+        $display("[TEST] T05: FANOUT_STAGES=%0d latency invariance", FANOUT_STAGES);
         reset_dut();
         for (int img = 0; img < 2; img++) begin
             for (int i = 0; i < ITERS; i++) xv[i] = P_W'($urandom());
@@ -438,14 +441,14 @@ module tb_bnn_np_bank;
     endtask
 
     //==========================================================================
-    // €” Back-to-back images: no state leakage
+    // T06 â€” Back-to-back images: no state leakage
     //==========================================================================
     task automatic test_t06_back_to_back();
         int n_imgs = B2B_IMAGES;
         logic [P_W-1:0]   xv[ITERS];
         logic [P_W-1:0]   wm[P_N][ITERS];
         logic [ACC_W-1:0] tv[P_N];
-        $display("[test] %0d back-to-back images", n_imgs);
+        $display("[TEST] T06: %0d back-to-back images", n_imgs);
         reset_dut();
         for (int img = 0; img < n_imgs; img++) begin
             for (int i = 0; i < ITERS; i++) xv[i] = P_W'($urandom());
@@ -459,13 +462,13 @@ module tb_bnn_np_bank;
     endtask
 
     //==========================================================================
-    // €” np_valid_in gaps during an image (stall behavior)
+    // T07 â€” np_valid_in gaps during an image (stall behavior)
     //==========================================================================
     task automatic test_t07_valid_gaps();
         logic [P_W-1:0]   xv[ITERS];
         logic [P_W-1:0]   wm[P_N][ITERS];
         logic [ACC_W-1:0] tv[P_N];
-        $display("[test] np_valid_in gaps (70%% probability)");
+        $display("[TEST] T07: np_valid_in gaps (70%% probability)");
         reset_dut();
         for (int i = 0; i < ITERS; i++) xv[i] = P_W'($urandom());
         for (int j = 0; j < P_N; j++) begin
@@ -476,14 +479,14 @@ module tb_bnn_np_bank;
         compute_and_check_golden(1'b0, "T07_gaps");
     endtask
 
-    //==========================================================================
-    // €” Reset mid-image: clean recovery
-    //==========================================================================
+    //=======================================================================
+    // T08 â€” Reset mid-image: clean recovery
+    //=========================================================================
     task automatic test_t08_reset_mid_image();
         logic [P_W-1:0]   xv[ITERS];
         logic [P_W-1:0]   wm[P_N][ITERS];
         logic [ACC_W-1:0] tv[P_N];
-        $display("[test] Reset mid-image, then clean image");
+        $display("[TEST] T08: Reset mid-image, then clean image");
         reset_dut();
 
         // Start driving an image but reset halfway through
@@ -526,16 +529,16 @@ module tb_bnn_np_bank;
         compute_and_check_golden(1'b0, "T08_clean_after_reset");
     endtask
 
-    //==========================================================================
-    // €” Large random stress: many images, alternating modes and gaps
-    //==========================================================================
+    //=======================================================================
+    // T09 â€” Large random stress: many images, alternating modes and gaps
+    //=====================================================================
     task automatic test_t09_random_stress();
         logic [P_W-1:0]   xv[ITERS];
         logic [P_W-1:0]   wm[P_N][ITERS];
         logic [ACC_W-1:0] tv[P_N];
         bit mode_sel;
         real valid_prob;
-        $display("[test] %0d-image random stress with mixed modes/gaps", STRESS_IMAGES);
+        $display("[TEST] T09: %0d-image random stress with mixed modes/gaps", STRESS_IMAGES);
         reset_dut();
         for (int img = 0; img < STRESS_IMAGES; img++) begin
             mode_sel   = (img % 2);

@@ -1,4 +1,4 @@
-`timescale 1ns/1ps
+`timescale 1ns/100ps
 
 module bnn_dp_ram_tb;
 
@@ -58,9 +58,9 @@ module bnn_dp_ram_tb;
 
     logic [WIDTH-1:0] golden_mem [DEPTH];
 
-    //--------------------------------------------------------------------------
+    //
     // Functional coverage
-    //--------------------------------------------------------------------------
+    //
     logic rd_en_d_q;
     always_ff @(posedge clk) begin
         if (rst) rd_en_d_q <= 1'b0;
@@ -95,9 +95,9 @@ module bnn_dp_ram_tb;
     endgroup
     cg_functional cg_inst = new();
 
-    //--------------------------------------------------------------------------
+    //
     // Scoreboard
-    //--------------------------------------------------------------------------
+    //
     int pass_count = 0;
     int fail_count = 0;
     int test_count = 0;
@@ -113,9 +113,9 @@ module bnn_dp_ram_tb;
         end
     endtask
 
-    //--------------------------------------------------------------------------
-    // SVAs
-    //--------------------------------------------------------------------------
+    //
+    // SVAs (white-box)
+    //
     property p_wr_addr_in_range;
         @(posedge clk) disable iff (rst) wr_en |-> (wr_addr < DEPTH);
     endproperty
@@ -134,9 +134,9 @@ module bnn_dp_ram_tb;
     a_wr_data_no_x: assert property (p_wr_data_no_x)
         else $error("SVA A3: wr_data contains X when wr_en asserted");
 
-    //--------------------------------------------------------------------------
+    //
     // Reset task
-    //--------------------------------------------------------------------------
+    //
     task automatic reset_dut();
         @(posedge clk);
         rst       <= 1'b1;
@@ -156,9 +156,9 @@ module bnn_dp_ram_tb;
         repeat (5) @(posedge clk);
     endtask
 
-    //--------------------------------------------------------------------------
+    //
     // Helpers — DUT 0
-    //--------------------------------------------------------------------------
+    //
     // Drive a single write (1 cycle drive), then idle cycle.
     task automatic do_write(input logic [ADDR_W-1:0] a, input logic [WIDTH-1:0] d);
         @(posedge clk);
@@ -185,9 +185,9 @@ module bnn_dp_ram_tb;
         rd_en <= 1'b0;
     endtask
 
-    //--------------------------------------------------------------------------
+    //
     // Main Test Sequence
-    //--------------------------------------------------------------------------
+    //
     initial begin : main_test
         logic [WIDTH-1:0] v;
         logic [WIDTH-1:0] held_val;
@@ -200,9 +200,9 @@ module bnn_dp_ram_tb;
 
         reset_dut();
 
-        //----------------------------------------------------------------------
+        //
         // DT1: write_then_read_same_addr
-        //----------------------------------------------------------------------
+        //
         $display("[DT1] write_then_read_same_addr - start");
         begin
             v = 8'hA5;
@@ -211,9 +211,9 @@ module bnn_dp_ram_tb;
         end
         $display("[DT1] done");
 
-        //----------------------------------------------------------------------
+        //
         // DT2: write_walk_address_space + readback
-        //----------------------------------------------------------------------
+        //
         $display("[DT2] write_walk_address_space - start");
         begin
             for (int a = 0; a < DEPTH; a++) begin
@@ -236,13 +236,13 @@ module bnn_dp_ram_tb;
         end
         $display("[DT2] done");
 
-        //----------------------------------------------------------------------
+        //
         // DT3: interleaved write-read different addresses (pipelined)
         //   drive (wr=i, rd=DEPTH-1-i) each cycle. Expected rd = golden[rd_a]
         //   at drive time (pre-update), since (a) same-cycle w-r-to-same-addr
         //   gives old data, and (b) writes happen at wr_a != rd_a.
         //   Actual rd_data is visible 2 edges after drive.
-        //----------------------------------------------------------------------
+        //
         $display("[DT3] interleaved_write_read - start");
         begin
             // Sliding pipe of depth 2
@@ -286,9 +286,9 @@ module bnn_dp_ram_tb;
         end
         $display("[DT3] done");
 
-        //----------------------------------------------------------------------
+        //
         // DT4: back-to-back reads (no writes)
-        //----------------------------------------------------------------------
+        //
         $display("[DT4] back_to_back_reads - start");
         begin
             logic [WIDTH-1:0] exp_q [0:1];
@@ -320,9 +320,9 @@ module bnn_dp_ram_tb;
         end
         $display("[DT4] done");
 
-        //----------------------------------------------------------------------
+        //
         // DT5: rd_en gated — output must hold previous value
-        //----------------------------------------------------------------------
+        //
         $display("[DT5] rd_en_gated - start");
         begin
             // Load rd_data with golden_mem[0]
@@ -345,9 +345,9 @@ module bnn_dp_ram_tb;
         end
         $display("[DT5] done");
 
-        //----------------------------------------------------------------------
+        //
         // DT6: max value at max addr
-        //----------------------------------------------------------------------
+        //
         $display("[DT6] max_value_at_max_addr - start");
         begin
             v = {WIDTH{1'b1}};
@@ -356,9 +356,9 @@ module bnn_dp_ram_tb;
         end
         $display("[DT6] done");
 
-        //----------------------------------------------------------------------
+        //
         // DT10: random stress
-        //----------------------------------------------------------------------
+        //
         $display("[DT10] random_stress - start");
         begin
             logic [WIDTH-1:0] exp_q [0:1];
@@ -414,9 +414,9 @@ module bnn_dp_ram_tb;
         end
         $display("[DT10] done");
 
-        //----------------------------------------------------------------------
+        //
         // DT7: reset clears output register
-        //----------------------------------------------------------------------
+        //
         $display("[DT7] reset_clears_output - start");
         begin
             // Ensure rd_data has something to clear
@@ -436,19 +436,19 @@ module bnn_dp_ram_tb;
         end
         $display("[DT7] done");
 
-        //----------------------------------------------------------------------
+        //
         // DT8: memory survives reset
-        //----------------------------------------------------------------------
+        //
         $display("[DT8] mem_survives_reset - start");
         begin
             do_read_check("DT8_mem_survives_rst", '0, golden_mem[0]);
         end
         $display("[DT8] done");
 
-        //----------------------------------------------------------------------
+        //
         // DT9: DUT1 (OUTPUT_REG=1) — 2-cycle read latency
         //   Visible to TB 3 edges after drive.
-        //----------------------------------------------------------------------
+        //
         $display("[DT9] OUTPUT_REG=1 two_cycle_latency - start");
         begin
             logic [WIDTH-1:0] exp_q [0:2];
@@ -495,9 +495,9 @@ module bnn_dp_ram_tb;
         end
         $display("[DT9] done");
 
-        //----------------------------------------------------------------------
+        //
         // Final report
-        //----------------------------------------------------------------------
+        //
         repeat (5) @(posedge clk);
         $display("============================================");
         $display("  Pass: %0d  Fail: %0d  Total: %0d", pass_count, fail_count, test_count);
@@ -511,9 +511,9 @@ module bnn_dp_ram_tb;
         $finish;
     end
 
-    //--------------------------------------------------------------------------
+    //
     // Safety timeout
-    //--------------------------------------------------------------------------
+    //
     initial begin
         #500000;
         $error("TIMEOUT: simulation exceeded 500 us");

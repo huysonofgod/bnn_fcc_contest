@@ -6,6 +6,8 @@ module bnn_unpack_datapath #(
     parameter int LID_W  = 4,
     parameter int NPID_W = 8,
     parameter int ADDR_W = 16,
+    parameter int STATIC_WORDS_PER_NEURON = 0,
+    parameter int STATIC_BYTES_PER_NEURON = 0,
     localparam int ACCUM_W = P_W + 8,
     localparam int BIA_W   = $clog2(ACCUM_W + 1)
 )(
@@ -48,21 +50,47 @@ module bnn_unpack_datapath #(
 
     localparam bit P_N_IS_POW2 = (P_N > 0) && ((P_N & (P_N - 1)) == 0);
     localparam int NP_SHIFT    = (P_N > 1) ? $clog2(P_N) : 1;
+    localparam bit P_W_IS_POW2 = (P_W > 0) && ((P_W & (P_W - 1)) == 0);
+    localparam int PW_SHIFT    = (P_W > 1) ? $clog2(P_W) : 1;
 
-    //  config registers 
+    
     logic [15:0]      fan_in_r_q;
     logic [15:0]      bpn_r_q;
     logic [15:0]      nneur_r_q;
     logic [LID_W-1:0] lid_r_q;
     logic [15:0]      wpn_r_q;
     logic [15:0]      wpn_load;
+    logic [15:0]      bpn_load;
 
-    assign wpn_load = (cfg_fan_in + 16'(P_W - 1)) / 16'(P_W);
+    // Words-per-neuron: topology-derived static constant when possible so
+    // wpn_r_q does not depend on live header bits (STATIC_WORDS_PER_NEURON).
+    generate
+        if (STATIC_WORDS_PER_NEURON > 0) begin : g_wpn_static
+            assign wpn_load = 16'(STATIC_WORDS_PER_NEURON);
+        end else if (P_W == 1) begin : g_wpn_pw1
+            assign wpn_load = cfg_fan_in;
+        end else if (P_W_IS_POW2) begin : g_wpn_pow2
+            assign wpn_load = (cfg_fan_in + 16'(P_W - 1)) >> PW_SHIFT;
+        end else begin : g_wpn_div
+            assign wpn_load = (cfg_fan_in + 16'(P_W - 1)) / 16'(P_W);
+        end
+    endgenerate
+
+    // Bytes-per-neuron: static constant eliminates cfg_bytes_per_neuron from
+    // bpn_r_q, bounding neuron_byte_rem_r_q to STATIC_BYTES_PER_NEURON bits so
+    // Vivado optimizes the rem==1 / rem==0 comparisons to fewer LUTs.
+    generate
+        if (STATIC_BYTES_PER_NEURON > 0) begin : g_bpn_static
+            assign bpn_load = 16'(STATIC_BYTES_PER_NEURON);
+        end else begin : g_bpn_dyn
+            assign bpn_load = cfg_bytes_per_neuron;
+        end
+    endgenerate
 
     always_ff @(posedge clk) begin
         if (cfg_we) begin
             fan_in_r_q <= cfg_fan_in;
-            bpn_r_q    <= cfg_bytes_per_neuron;
+            bpn_r_q    <= bpn_load;
             nneur_r_q  <= cfg_num_neurons;
             lid_r_q    <= cfg_layer_id;
             wpn_r_q    <= wpn_load;
@@ -77,7 +105,7 @@ module bnn_unpack_datapath #(
         end
     end
 
-    //   accumulator 
+    
     logic [ACCUM_W-1:0] accum_r_q;
     logic [ACCUM_W-1:0] shifted_byte;
     logic [ACCUM_W-1:0] merged_accum;
@@ -133,7 +161,7 @@ module bnn_unpack_datapath #(
             accum_r_q <= '0;
     end
 
-    //  bits-in counter 
+    
     assign bits_after_byte = bits_in_r_q + byte_valid_bits;
     assign bits_after_emit = bits_in_r_q - BIA_W'(P_W);
 
@@ -156,40 +184,71 @@ module bnn_unpack_datapath #(
             bits_in_r_q <= '0;
     end
 
-    //  neuron byte counter 
-    logic [15:0] neuron_byte_cnt_r_q;
-    logic [15:0] neuron_byte_cnt_next;
+    
+    logic [15:0] neuron_byte_rem_r_q;
+    logic [15:0] neuron_byte_rem_dec_w;
+    logic [15:0] neuron_byte_rem_next;
 
-    assign neuron_bytes_done = (bpn_r_q != 16'd0) &&
-                               (neuron_byte_cnt_r_q == (bpn_r_q - 16'd1));
-    assign neuron_bytes_complete = (bpn_r_q != 16'd0) &&
-                                   (neuron_byte_cnt_r_q == bpn_r_q);
-    assign neuron_byte_cnt_next = neur_byte_clr ? 16'd0
-                                                : (neuron_byte_cnt_r_q + 16'd1);
+    // The original implementation compared an up-counter against bpn_r_q and
+    // bpn_r_q-1 every cycle. At 1 ns, that placed a registered config field on
+    // the M10 FSM/counter-clear critical path. A down-counter loads BPN only at
+    // message/neuron boundaries; steady-state control now checks rem==1/rem==0.
+    assign neuron_bytes_done     = (neuron_byte_rem_r_q == 16'd1);
+    assign neuron_bytes_complete = (neuron_byte_rem_r_q == 16'd0);
+    assign neuron_byte_rem_dec_w = (neuron_byte_rem_r_q != 16'd0)
+                                 ? (neuron_byte_rem_r_q - 16'd1)
+                                 : 16'd0;
 
-    always_ff @(posedge clk) begin
+    always_comb begin
         if (cfg_we)
-            neuron_byte_cnt_r_q <= '0;
+            neuron_byte_rem_next = bpn_load;
+        else if (neur_byte_we && neur_byte_clr)
+            neuron_byte_rem_next = bpn_r_q;
         else if (neur_byte_we)
-            neuron_byte_cnt_r_q <= neuron_byte_cnt_next;
-
-        if (rst)
-            neuron_byte_cnt_r_q <= '0;
+            neuron_byte_rem_next = neuron_byte_rem_dec_w;
+        else
+            neuron_byte_rem_next = neuron_byte_rem_r_q;
     end
 
-    //  neuron / word counters 
+    always_ff @(posedge clk) begin
+        neuron_byte_rem_r_q <= neuron_byte_rem_next;
+
+        if (rst)
+            neuron_byte_rem_r_q <= '0;
+    end
+
+    
     logic [15:0] neuron_idx_r_q;
-    logic [15:0] word_idx_r_q;
+    logic [15:0] word_rem_r_q;
     logic [15:0] neuron_idx_next;
-    logic [15:0] word_idx_next;
+    logic [15:0] word_rem_dec_w;
+    logic [15:0] word_rem_next;
+
+    // word_idx: bounded up-counter for address (0..WPN-1). With STATIC_WORDS_PER_NEURON
+    // Vivado bounds the counter to WPN_BITS wide, shortening the address adder carry chain.
+    localparam int WPN_BITS = (STATIC_WORDS_PER_NEURON > 0)
+                              ? $clog2(STATIC_WORDS_PER_NEURON + 1) : 16;
+    logic [WPN_BITS-1:0] word_idx_r_q;
 
     assign last_neuron = (nneur_r_q != 16'd0) &&
                          (neuron_idx_r_q == (nneur_r_q - 16'd1));
-    assign last_word   = (wpn_r_q != 16'd0) &&
-                         (word_idx_r_q == (wpn_r_q - 16'd1));
+    // word_rem_r_q down-counter: loaded from wpn at cfg/neuron boundary, decrements
+    // each word. last_word fires when rem==1 (no wpn_r_q-1 compare or reset fanout).
+    assign last_word   = (word_rem_r_q == 16'd1);
 
     assign neuron_idx_next = neuron_clr ? 16'd0 : (neuron_idx_r_q + 16'd1);
-    assign word_idx_next   = word_clr ? 16'd0 : (word_idx_r_q + 16'd1);
+    assign word_rem_dec_w  = (word_rem_r_q != 16'd0) ? (word_rem_r_q - 16'd1) : 16'd0;
+
+    always_comb begin
+        if (cfg_we)
+            word_rem_next = wpn_load;
+        else if (word_we && word_clr)
+            word_rem_next = wpn_r_q;
+        else if (word_we)
+            word_rem_next = word_rem_dec_w;
+        else
+            word_rem_next = word_rem_r_q;
+    end
 
     always_ff @(posedge clk) begin
         if (cfg_we)
@@ -202,41 +261,60 @@ module bnn_unpack_datapath #(
     end
 
     always_ff @(posedge clk) begin
-        if (cfg_we)
+        word_rem_r_q <= word_rem_next;
+
+        if (rst)
+            word_rem_r_q <= '0;
+    end
+
+    // word_idx up-counter: mirrors word_rem resets but counts up for address.
+    // addr = base + word_idx (simple addition, no subtraction on critical path).
+    always_ff @(posedge clk) begin
+        if (cfg_we || (word_we && word_clr))
             word_idx_r_q <= '0;
         else if (word_we)
-            word_idx_r_q <= word_idx_next;
+            word_idx_r_q <= word_idx_r_q + WPN_BITS'(1);
 
         if (rst)
             word_idx_r_q <= '0;
     end
 
-    //  NP / address generation 
-    logic [15:0]          local_neuron;
-    logic [NPID_W-1:0]    np_id;
-    logic [ADDR_W-1:0]    addr_base;
+    
+    logic [NPID_W-1:0]    np_id_r_q;
+    logic [ADDR_W-1:0]    addr_base_r_q;
     logic [ADDR_W-1:0]    wr_addr_comb;
 
-    always_comb begin
-        np_id        = '0;
-        local_neuron = '0;
+    always_ff @(posedge clk) begin
+        if (cfg_we) begin
+            np_id_r_q     <= '0;
+            addr_base_r_q <= '0;
+        end else if (neuron_we) begin
+            if (neuron_clr) begin
+                np_id_r_q     <= '0;
+                addr_base_r_q <= '0;
+            end else if (P_N == 1) begin
+                np_id_r_q     <= '0;
+                addr_base_r_q <= addr_base_r_q + ADDR_W'(wpn_r_q);
+            end else begin
+                if (np_id_r_q == NPID_W'(P_N - 1)) begin
+                    np_id_r_q     <= '0;
+                    addr_base_r_q <= addr_base_r_q + ADDR_W'(wpn_r_q);
+                end else begin
+                    np_id_r_q     <= np_id_r_q + NPID_W'(1);
+                end
+            end
+        end
 
-        if (P_N == 1) begin
-            np_id        = '0;
-            local_neuron = neuron_idx_r_q;
-        end else if (P_N_IS_POW2) begin
-            np_id        = NPID_W'(neuron_idx_r_q[NP_SHIFT-1:0]);
-            local_neuron = neuron_idx_r_q >> NP_SHIFT;
-        end else begin
-            np_id        = NPID_W'(neuron_idx_r_q % P_N);
-            local_neuron = 16'((neuron_idx_r_q / P_N));
+        if (rst) begin
+            np_id_r_q     <= '0;
+            addr_base_r_q <= '0;
         end
     end
 
-    assign addr_base   = ADDR_W'(local_neuron) * ADDR_W'(wpn_r_q);
-    assign wr_addr_comb = addr_base + ADDR_W'(word_idx_r_q);
+    // addr = base + word_idx: simple addition, word_idx bounded to WPN_BITS.
+    assign wr_addr_comb = addr_base_r_q + ADDR_W'(word_idx_r_q);
 
-    //  output transaction slot 
+    
     logic [P_W-1:0]    wr_data_r_q;
     logic [LID_W-1:0]  wr_layer_r_q;
     logic [NPID_W-1:0] wr_np_r_q;
@@ -251,7 +329,7 @@ module bnn_unpack_datapath #(
         if (txn_we) begin
             wr_data_r_q        <= pad_sel ? padded_word : accum_r_q[P_W-1:0];
             wr_layer_r_q       <= lid_r_q;
-            wr_np_r_q          <= np_id;
+            wr_np_r_q          <= np_id_r_q;
             wr_addr_r_q        <= wr_addr_comb;
             wr_last_word_r_q   <= last_word;
             wr_last_neuron_r_q <= last_word & last_neuron;
@@ -285,7 +363,7 @@ module bnn_unpack_datapath #(
             wr_valid_r_q <= 1'b0;
     end
 
-    //  Output assignments 
+    
     assign wr_valid       = wr_valid_r_q;
     assign wr_layer       = wr_layer_r_q;
     assign wr_np          = wr_np_r_q;

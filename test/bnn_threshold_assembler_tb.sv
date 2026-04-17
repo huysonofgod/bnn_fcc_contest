@@ -2,9 +2,11 @@
 
 module bnn_threshold_assembler_tb;
 
-    //==========================================================================
+    localparam int RANDOM_THRESHOLDS = 10000;
+
+    //
     // DUT Interface Signals
-    //==========================================================================
+    //
     logic        clk = 0;
     logic        rst = 1;
     logic        byte_valid;
@@ -14,14 +16,14 @@ module bnn_threshold_assembler_tb;
     logic        thresh_ready;
     logic [31:0] thresh_data;
 
-    //==========================================================================
+    //
     // Clock Generation (100 MHz)
-    //==========================================================================
+    //
     always #5 clk = ~clk;
 
-    //==========================================================================
+    //
     // DUT Instantiation
-    //==========================================================================
+    //
     bnn_threshold_assembler DUT (
         .clk          (clk),
         .rst          (rst),
@@ -33,67 +35,67 @@ module bnn_threshold_assembler_tb;
         .thresh_data  (thresh_data)
     );
 
-    //==========================================================================
+    //
     // SVA Properties (Gray Box)
-    //==========================================================================
+    //
 
-    //--------------------------------------------------------------------------
-    // thresh_valid asserts after exactly 4 byte handshakes
+    //
+    // SVA-1: thresh_valid asserts after exactly 4 byte handshakes
     // RATIONALE: 32-bit threshold = 4 bytes. The internal byte_cnt_r_q reaches
     // 3 (0-indexed) on the 4th byte, triggering assembly_done -> thresh_valid.
-    //--------------------------------------------------------------------------
+    //
     property p_valid_after_4_bytes;
         @(posedge clk) disable iff (rst)
         (DUT.u_dp.byte_cnt_r_q == 2'd3 && byte_valid && byte_ready) |=> thresh_valid;
     endproperty
     assert property (p_valid_after_4_bytes)
-    else $error("[assertion] FAIL: thresh_valid did not assert after 4th byte handshake");
+    else $error("[SVA] FAIL: thresh_valid did not assert after 4th byte handshake");
 
-    //--------------------------------------------------------------------------
-    // AXI-Stream valid-hold on output -- once thresh_valid is asserted
+    //
+    // SVA-2: AXI-Stream valid-hold on output -- once thresh_valid is asserted
     // and thresh_ready is low, thresh_valid must remain high until consumed.
     // RATIONALE: AXI4-Stream protocol compliance; dropping valid is illegal.
-    //--------------------------------------------------------------------------
+    //
     property p_thresh_valid_hold;
         @(posedge clk) disable iff (rst)
         (thresh_valid && !thresh_ready) |=> thresh_valid;
     endproperty
     assert property (p_thresh_valid_hold)
-    else $error("[assertion] FAIL: thresh_valid dropped without thresh_ready handshake");
+    else $error("[SVA] FAIL: thresh_valid dropped without thresh_ready handshake");
 
-    //--------------------------------------------------------------------------
-    // thresh_data stable during backpressure -- when thresh_valid is
+    //
+    // SVA-3: thresh_data stable during backpressure -- when thresh_valid is
     // asserted but not consumed, data must not change.
     // RATIONALE: AXI4-Stream data stability requirement.
-    //--------------------------------------------------------------------------
+    //
     property p_thresh_data_stable;
         @(posedge clk) disable iff (rst)
         (thresh_valid && !thresh_ready) |=> $stable(thresh_data);
     endproperty
     assert property (p_thresh_data_stable)
-    else $error("[assertion] FAIL: thresh_data changed during backpressure");
+    else $error("[SVA] FAIL: thresh_data changed during backpressure");
 
-    //--------------------------------------------------------------------------
-    // byte_ready backpressure when output stalled -- when thresh_valid
+    //
+    // SVA-4: byte_ready backpressure when output stalled -- when thresh_valid
     // is high and thresh_ready is low, byte_ready must be low to stop input.
     // RATIONALE: byte_ready = ~thresh_vld_r_q | thresh_ready. When stalled,
     // no new bytes should be accepted.
-    //--------------------------------------------------------------------------
+    //
     property p_byte_ready_backpressure;
         @(posedge clk) disable iff (rst)
         (thresh_valid && !thresh_ready) |-> !byte_ready;
     endproperty
     assert property (p_byte_ready_backpressure)
-    else $error("[assertion] FAIL: byte_ready high while output stalled");
+    else $error("[SVA] FAIL: byte_ready high while output stalled");
 
-    //==========================================================================
+    //
     // Covergroups
-    //==========================================================================
+    //
 
-    //--------------------------------------------------------------------------
+    //
     // COVERGROUP: Covers byte counter states (0..3), threshold value ranges,
     // output backpressure events, and byte-side handshake patterns.
-    //--------------------------------------------------------------------------
+    //
     covergroup cg_threshold @(posedge clk iff (!rst));
         // Cover byte counter states (gray-box into DUT datapath)
         cp_byte_cnt: coverpoint DUT.u_dp.byte_cnt_r_q {
@@ -128,9 +130,9 @@ module bnn_threshold_assembler_tb;
 
     cg_threshold cg_inst = new();
 
-    //==========================================================================
+    //
     // Scoreboard
-    //==========================================================================
+    //
     int pass_count = 0;
     int fail_count = 0;
     string fail_log[$];
@@ -146,9 +148,9 @@ module bnn_threshold_assembler_tb;
         end
     endfunction
 
-    //==========================================================================
+    //
     // Reset Task
-    //==========================================================================
+    //
     task automatic reset_dut();
         rst        <= 1'b1;
         byte_valid <= 1'b0;
@@ -159,11 +161,11 @@ module bnn_threshold_assembler_tb;
         repeat (3) @(posedge clk);
     endtask
 
-    //==========================================================================
+    //
     // Helper: Send 4 bytes and collect threshold (with optional gaps/backpressure)
     //   bytes[0] = LSB, bytes[3] = MSB
     //   Returns assembled threshold via output arg
-    //==========================================================================
+    //
     task automatic send_threshold(
         input  logic [7:0] b0, b1, b2, b3,
         input  bit         with_gaps,        // insert random valid gaps
@@ -201,11 +203,11 @@ module bnn_threshold_assembler_tb;
         thresh_ready <= 1'b0;
     endtask
 
-    //==========================================================================
+    //
     // Test Scenarios
-    //==========================================================================
+    //
 
-    // Known value -- {0x78, 0x56, 0x34, 0x12} -> 0x12345678
+    //--- Test 1: Known value -- {0x78, 0x56, 0x34, 0x12} -> 0x12345678 --------
     task automatic test_known_value();
         logic [31:0] result;
         $display("[TEST] test_known_value: expect 0x12345678");
@@ -214,7 +216,7 @@ module bnn_threshold_assembler_tb;
               $sformatf("expected 0x12345678, got 0x%08h", result));
     endtask
 
-    // Zero threshold -- all zero bytes -> 0x00000000
+    //--- Test 2: Zero threshold -- all zero bytes -> 0x00000000 ----------------
     task automatic test_zero_threshold();
         logic [31:0] result;
         $display("[TEST] test_zero_threshold");
@@ -223,7 +225,7 @@ module bnn_threshold_assembler_tb;
               $sformatf("expected 0x00000000, got 0x%08h", result));
     endtask
 
-    // Maximum threshold -- all 0xFF -> 0xFFFFFFFF
+    //--- Test 3: Maximum threshold -- all 0xFF -> 0xFFFFFFFF -------------------
     task automatic test_max_threshold();
         logic [31:0] result;
         $display("[TEST] test_max_threshold");
@@ -232,7 +234,7 @@ module bnn_threshold_assembler_tb;
               $sformatf("expected 0xFFFFFFFF, got 0x%08h", result));
     endtask
 
-    // Backpressure test -- thresh_ready=0 after 4th byte
+    //--- Test 4: Backpressure test -- thresh_ready=0 after 4th byte -----------
     task automatic test_backpressure();
         logic [31:0] result;
         $display("[TEST] test_backpressure");
@@ -241,7 +243,7 @@ module bnn_threshold_assembler_tb;
               $sformatf("expected 0xDDCCBBAA, got 0x%08h", result));
     endtask
 
-    // Gapped bytes -- byte_valid gaps between bytes
+    //--- Test 5: Gapped bytes -- byte_valid gaps between bytes -----------------
     task automatic test_gapped_bytes();
         logic [31:0] result;
         $display("[TEST] test_gapped_bytes");
@@ -250,7 +252,7 @@ module bnn_threshold_assembler_tb;
               $sformatf("expected 0x04030201, got 0x%08h", result));
     endtask
 
-    // Back-to-back thresholds -- continuous 4-byte streams
+    //--- Test 6: Back-to-back thresholds -- continuous 4-byte streams ----------
     task automatic test_back_to_back();
         logic [31:0] result;
         logic [31:0] expected;
@@ -288,12 +290,70 @@ module bnn_threshold_assembler_tb;
         thresh_ready <= 1'b0;
     endtask
 
-    // Random stress -- random byte values, random gaps/backpressure
+    //--- Test 7: Coverage closure -- explicit threshold value classes ---------
+    task automatic test_value_range_closure();
+        logic [31:0] result;
+        $display("[TEST] test_value_range_closure");
+
+        send_threshold(8'h01, 8'h00, 8'h00, 8'h00, 0, 0, result);
+        check("range_small", result == 32'h00000001,
+              $sformatf("expected 0x00000001, got 0x%08h", result));
+
+        send_threshold(8'h00, 8'h01, 8'h00, 8'h00, 0, 0, result);
+        check("range_medium", result == 32'h00000100,
+              $sformatf("expected 0x00000100, got 0x%08h", result));
+
+        send_threshold(8'h00, 8'h00, 8'h01, 8'h00, 0, 0, result);
+        check("range_large", result == 32'h00010000,
+              $sformatf("expected 0x00010000, got 0x%08h", result));
+    endtask
+
+    //--- Test 8: Byte-side stall while output is backpressured ----------------
+    task automatic test_input_stall_during_output_backpressure();
+        logic [31:0] result;
+        $display("[TEST] test_input_stall_during_output_backpressure");
+
+        thresh_ready <= 1'b0;
+        byte_valid   <= 1'b1;
+        byte_data    <= 8'h11; @(posedge clk); while (!byte_ready) @(posedge clk);
+        byte_data    <= 8'h22; @(posedge clk); while (!byte_ready) @(posedge clk);
+        byte_data    <= 8'h33; @(posedge clk); while (!byte_ready) @(posedge clk);
+        byte_data    <= 8'h44; @(posedge clk); while (!byte_ready) @(posedge clk);
+
+        byte_data    <= 8'hAA;
+        repeat (3) begin
+            @(posedge clk);
+            check("input_stall_byte_ready_low", byte_ready == 1'b0,
+                  $sformatf("byte_ready=%b expected 0 during output stall", byte_ready));
+        end
+
+        thresh_ready <= 1'b1;
+        while (!thresh_valid) @(posedge clk);
+        result = thresh_data;
+        check("stalled_output_value", result == 32'h44332211,
+              $sformatf("expected 0x44332211, got 0x%08h", result));
+        @(posedge clk);
+
+        while (!byte_ready) @(posedge clk);
+        byte_data <= 8'hBB; @(posedge clk); while (!byte_ready) @(posedge clk);
+        byte_data <= 8'hCC; @(posedge clk); while (!byte_ready) @(posedge clk);
+        byte_data <= 8'hDD; @(posedge clk); while (!byte_ready) @(posedge clk);
+        byte_valid <= 1'b0;
+
+        @(posedge clk);
+        while (!thresh_valid) @(posedge clk);
+        check("stalled_input_resume", thresh_data == 32'hDDCCBBAA,
+              $sformatf("expected 0xDDCCBBAA, got 0x%08h", thresh_data));
+        @(posedge clk);
+        thresh_ready <= 1'b0;
+    endtask
+
+    //--- Test 9: Random stress -- random byte values, random gaps/backpressure -
     task automatic test_random_stress();
         logic [31:0] result;
         logic [7:0] b [4];
         logic [31:0] expected;
-        int num_thresh = 50;
+        int num_thresh = RANDOM_THRESHOLDS;
         $display("[TEST] test_random_stress: %0d random thresholds", num_thresh);
 
         for (int t = 0; t < num_thresh; t++) begin
@@ -308,7 +368,7 @@ module bnn_threshold_assembler_tb;
         end
     endtask
 
-    // LE reconstruction -- specific patterns for endianness
+    //--- Test 8: LE reconstruction -- specific patterns for endianness ---------
     task automatic test_le_reconstruction();
         logic [31:0] result;
         $display("[TEST] test_le_reconstruction: verify {B3,B2,B1,B0}");
@@ -324,9 +384,9 @@ module bnn_threshold_assembler_tb;
               $sformatf("expected 0xDEADBEEF, got 0x%08h", result));
     endtask
 
-    //==========================================================================
+    //
     // Main Test Sequence
-    //==========================================================================
+    //
     initial begin
         $display("============================================================");
         $display("  bnn_threshold_assembler Testbench (CRV, Gray-Box)");
@@ -352,6 +412,12 @@ module bnn_threshold_assembler_tb;
         test_back_to_back();
         reset_dut();
 
+        test_value_range_closure();
+        reset_dut();
+
+        test_input_stall_during_output_backpressure();
+        reset_dut();
+
         test_le_reconstruction();
         reset_dut();
 
@@ -359,9 +425,9 @@ module bnn_threshold_assembler_tb;
 
         repeat (20) @(posedge clk);
 
-        //======================================================================
+        //
         // Scoreboard Summary
-        //======================================================================
+        //
         $display("");
         $display("============================================================");
         $display("  SCOREBOARD SUMMARY -- bnn_threshold_assembler");

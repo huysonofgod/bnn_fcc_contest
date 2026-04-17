@@ -5,7 +5,9 @@ module bnn_weight_unpacker #(
     parameter int P_N    = 8,
     parameter int LID_W  = 4,
     parameter int NPID_W = 8,
-    parameter int ADDR_W = 16
+    parameter int ADDR_W = 16,
+    parameter int STATIC_WORDS_PER_NEURON = 0,
+    parameter int STATIC_BYTES_PER_NEURON = 0
 )(
     input  logic                  clk,
     input  logic                  rst,
@@ -31,7 +33,7 @@ module bnn_weight_unpacker #(
     localparam int ACCUM_W = P_W + 8;
     localparam int BIA_W   = $clog2(ACCUM_W + 1);
 
-    //  control wires 
+    
     logic       cfg_we;
     logic       accum_we;
     logic [1:0] accum_sel;
@@ -46,6 +48,7 @@ module bnn_weight_unpacker #(
     logic       txn_we;
     logic       pad_sel;
 
+    
     logic [BIA_W-1:0] bits_after_byte;
     logic [BIA_W-1:0] bits_after_emit;
     logic             neuron_bytes_done;
@@ -53,7 +56,7 @@ module bnn_weight_unpacker #(
     logic             last_word;
     logic             last_neuron;
 
-    //  FSM 
+    
     bnn_unpack_ctrl #(
         .P_W (P_W)
     ) u_ctrl (
@@ -85,13 +88,15 @@ module bnn_weight_unpacker #(
         .pad_sel          (pad_sel)
     );
 
-    //  Datapath
+    
     bnn_unpack_datapath #(
         .P_W    (P_W),
         .P_N    (P_N),
         .LID_W  (LID_W),
         .NPID_W (NPID_W),
-        .ADDR_W (ADDR_W)
+        .ADDR_W (ADDR_W),
+        .STATIC_WORDS_PER_NEURON(STATIC_WORDS_PER_NEURON),
+        .STATIC_BYTES_PER_NEURON(STATIC_BYTES_PER_NEURON)
     ) u_dp (
         .clk              (clk),
         .rst              (rst),

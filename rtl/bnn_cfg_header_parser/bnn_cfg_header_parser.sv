@@ -24,7 +24,7 @@ module bnn_cfg_header_parser (
     output logic       msg_done            // message complete pulse
 );
 
-    // FSM control signals
+    
     logic hdr_sr_we;
     logic hdr_byte_we;
     logic hdr_byte_clr;
@@ -34,12 +34,12 @@ module bnn_cfg_header_parser (
     logic saw_last_set;
     logic in_payload;
 
-    // FSM status signals
+    
     logic hdr_complete;
     logic payload_done;
     logic saw_last_r_q;
 
-    // FSM instance
+    
     bnn_cfg_header_parser_fsm u_fsm (
         .clk              (clk),
         .rst              (rst),
@@ -65,7 +65,7 @@ module bnn_cfg_header_parser (
         .hdr_total_bytes  (hdr_total_bytes)
     );
 
-    // Datapath instance
+    
     bnn_cfg_header_parser_dp u_dp (
         .clk                 (clk),
         .rst                 (rst),

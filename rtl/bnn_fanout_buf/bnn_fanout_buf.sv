@@ -12,12 +12,11 @@ module bnn_fanout_buf #(
 
     generate
         if (PIPE_STAGES == 0) begin : g_passthrough
-            // Zero-latency wire passthrough
+            // ---- Zero latency: wire passthrough ----
             assign q = d;
 
         end else begin : g_pipe
-            // Registered pipeline with PIPE_STAGES stages
-            (* max_fanout = "auto" *)
+            // ---- Registered pipeline: PIPE_STAGES stages ----
             logic [WIDTH-1:0] pipe_r_q [PIPE_STAGES];
 
             // Stage 0: input capture
@@ -38,7 +37,9 @@ module bnn_fanout_buf #(
         end
     endgenerate
 
-    // Compile-time sanity checks
+    // -------------------------------------------------------------------------
+    // Compile-time sanity
+    // -------------------------------------------------------------------------
     initial begin
         assert (PIPE_STAGES >= 0 && PIPE_STAGES <= 4)
             else $fatal(1, "bnn_fanout_buf: PIPE_STAGES=%0d out of range [0..4]",

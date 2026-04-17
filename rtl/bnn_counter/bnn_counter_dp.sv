@@ -1,4 +1,5 @@
 `timescale 1ns/1ps
+
 module bnn_counter_dp #(
     parameter int WIDTH     = 8,
     parameter int RESET_VAL = 0
@@ -14,26 +15,26 @@ module bnn_counter_dp #(
     output logic               tc_pulse
 );
 
-    //  Registers 
+    
     logic [WIDTH-1:0] count_r_q;
     logic             tc_pulse_r_q;
 
-    //  Combinational datapath 
+    
     logic [WIDTH-1:0] count_plus_1;
     logic             tc_comb;
     logic             tc_and_en;
     logic [WIDTH-1:0] count_next;
     logic             count_we;
 
-    //  Adder
+    // Section A: Adder
     assign count_plus_1 = count_r_q + 1'b1;
 
-    // Comparator
+    // Section B: Comparator
     assign tc_comb   = (count_r_q == max_val);
     assign tc_and_en = tc_comb & en;
 
-    // Next-value 4:1 MUX (priority encoded)
-    // tc_and_en → RESET_VAL, load → load_val, default → count_plus_1
+    // Section C: Next-value 4:1 MUX (priority encoded)
+    // Priority: tc_and_en → RESET_VAL, load → load_val, default → count_plus_1
     always_comb begin
         if (load)
             count_next = load_val;
@@ -46,7 +47,7 @@ module bnn_counter_dp #(
     // Write-enable gate: only update count register when meaningful
     assign count_we = en | load;
 
-    //  Sequential: count register
+    
     always_ff @(posedge clk) begin
         if (count_we)
             count_r_q <= count_next;
@@ -56,7 +57,7 @@ module bnn_counter_dp #(
             count_r_q <= WIDTH'(RESET_VAL);
     end
 
-    //  Sequential: TC_PULSE register 
+    
     always_ff @(posedge clk) begin
         tc_pulse_r_q <= tc_and_en;
 
@@ -65,7 +66,9 @@ module bnn_counter_dp #(
             tc_pulse_r_q <= 1'b0;
     end
 
-    //  Output assignments 
+    
     assign count    = count_r_q;
     assign tc       = tc_comb;        // combinational (secondary)
     assign tc_pulse = tc_pulse_r_q;   // registered (primary)
+
+endmodule

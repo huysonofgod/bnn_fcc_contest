@@ -23,7 +23,7 @@ module NP_datapath #(
     output logic                 activation_out,
     output logic                 valid_out,
 
-    // Debug signals for bring-up; remove after verification
+    //DEBUG SIGNALS ---delete once verified correct---
     //TODO: comment out the debug signals once verified correct to save on routing congestion and potential timing issues
     output logic [P_W-1:0]       dbg_xnor_bits,
     output logic [$clog2(P_W + 1)-1:0] dbg_beat_popcount,
@@ -45,7 +45,11 @@ module NP_datapath #(
     logic                 activation_r_q;
     logic [ACC_W-1:0]     out_score_r; // rename for acc_r clarity
     logic                 valid_out_r_q;
-    logic                 threshold_pass_mux_o;
+    logic [ACC_W-1:0]     final_score_r_q;
+    logic [ACC_W-1:0]     final_threshold_r_q;
+    logic                 final_output_mode_r_q;
+    logic                 final_result_valid_r_q;
+    logic                 final_threshold_pass_w;
 
 
     // Compute XNOR and popcount
@@ -65,31 +69,41 @@ module NP_datapath #(
         if (acc_we) begin
             acc_r_q <= acc_mux_o;
         end
-        if (activation_r_we) begin
-            activation_r_q <= threshold_pass_mux_o;
-        end
-        if (out_score_r_we) begin
-            out_score_r <= acc_next;
-        end
+
+        // Final-beat score/threshold capture. The old implementation compared
+        // acc_next against threshold_in and wrote activation_r_q in the same
+        // cycle, putting XNOR/popcount/add/compare on one 1 ns path. This
+        // stage keeps the final score exact while moving the threshold compare
+        // to the following cycle from local registers.
         if (valid_out_we) begin
-            valid_out_r_q <= '1;
+            final_score_r_q        <= acc_next;
+            final_threshold_r_q    <= threshold_in;
+            final_output_mode_r_q  <= mode_output_layer_sel;
+            final_result_valid_r_q <= 1'b1;
         end else begin
-            valid_out_r_q <= '0;
+            final_result_valid_r_q <= 1'b0;
         end
+
+        if (final_result_valid_r_q) begin
+            activation_r_q <= final_output_mode_r_q ? 1'b0 : final_threshold_pass_w;
+            out_score_r    <= final_score_r_q;
+        end
+        valid_out_r_q <= final_result_valid_r_q;
+
         if (rst) begin
-            //TODO: check if this reset is necessary given that acc_sel can clear the accumulator to reduce fanout of the reset signal
-            //Removing itin the future to opmize for timing, but can add back if needed    
-            //Dont need to reset since they are invalid
-            // activation_r_q <= '0;
-            // out_score_r <= '0;
+            // Minimal reset: reset the valid signal and the accumulator only.
+            // - valid_out_r_q gates data validity (must be 0 after reset)
+            // - acc_r_q must be 0 for first beat computation to work
+            // - activation_r_q and out_score_r are don't-cares when valid=0
             acc_r_q <= '0;
             valid_out_r_q <= '0;
+            final_result_valid_r_q <= 1'b0;
         end
     end
 
     //threshold comparison and output logic
     assign threshold_pass_o = (acc_next >= threshold_in);
-    assign threshold_pass_mux_o = mode_output_layer_sel ? 0 : threshold_pass_o; // Force threshold pass to 0 for output layer
+    assign final_threshold_pass_w = (final_score_r_q >= final_threshold_r_q);
     //Assign outputs
     assign activation_out = activation_r_q;
     assign valid_out = valid_out_r_q;

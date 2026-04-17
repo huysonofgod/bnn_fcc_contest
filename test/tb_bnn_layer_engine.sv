@@ -30,7 +30,9 @@
 
 module tb_bnn_layer_engine;
 
+    //
     // Parameters
+    //
     parameter int  LAYER_IDX       = `ENG_TB_LAYER_IDX;
     parameter int  FAN_IN          = `ENG_TB_FAN_IN;
     parameter int  NUM_NEURONS     = `ENG_TB_NUM_NEURONS;
@@ -57,7 +59,9 @@ module tb_bnn_layer_engine;
     localparam int START_IGNORE_OBS_CYCLES =
         (IMAGE_TIMEOUT > 4000) ? 4000 : IMAGE_TIMEOUT;
 
+    //
     // DUT interface
+    //
     logic                         clk = 1'b0;
     logic                         rst = 1'b1;
 
@@ -94,10 +98,14 @@ module tb_bnn_layer_engine;
     logic [15:0]                  cfg_thr_addr  = '0;
     logic [31:0]                  cfg_thr_data  = '0;
 
+    //
     // Clock generation — 100 MHz
+    //
     always #5 clk = ~clk;
 
+    //
     // DUT instantiation
+    //
     bnn_layer_engine #(
         .LAYER_IDX       (LAYER_IDX),
         .FAN_IN          (FAN_IN),
@@ -141,10 +149,13 @@ module tb_bnn_layer_engine;
         .cfg_thr_data   (cfg_thr_data)
     );
 
+    //
     // Shadow RAMs — mirrors DUT weight and threshold BRAMs per NP
+    //
     // The TB loads shadow_wt[j][addr] and shadow_thr[j][addr] alongside every
     // cfg_wr_valid / cfg_thr_valid transaction. The golden model reads from
     // these shadow arrays to compute expected output.
+    //
     logic [P_W-1:0]   shadow_wt  [P_N][WT_DEPTH];
     logic [ACC_W-1:0] shadow_thr [P_N][PASSES];    // THR_DEPTH = PASSES
 
@@ -168,7 +179,9 @@ module tb_bnn_layer_engine;
         end
     end
 
+    //
     // Output collector — gathers DUT output beats until *_last
+    //
     // Hidden mode: collect m_data beats until m_last=1
     logic [NEXT_P_W-1:0] out_beats[$];
     int                   out_beat_cnt = 0;
@@ -209,7 +222,9 @@ module tb_bnn_layer_engine;
         done_seen_sticky = 1'b0;
     endtask
 
+    //
     // Scoreboard
+    //
     int pass_count = 0;
     int fail_count = 0;
     string fail_log[$];
@@ -219,83 +234,103 @@ module tb_bnn_layer_engine;
         else begin
             fail_count++;
             fail_log.push_back($sformatf("[FAIL] %s: %s", name, msg));
-            $error("%s: %s", name, msg);
+            $error("[SB] %s: %s", name, msg);
         end
     endfunction
 
+    //
     // SVAs
+    //
 
-    // done is a single-cycle pulse.
+    //
+    // SVA-1: done is a single-cycle pulse. STATE.md §4.4 / VP §4.4.E.
+    //
     property p_done_single_cycle;
         @(posedge clk) disable iff (rst)
         done |=> !done;
     endproperty
     assert property (p_done_single_cycle)
-    else $error("Assertion failed: done lasted more than 1 cycle");
+    else $error("[SVA] FAIL a_done_single_cycle: done lasted more than 1 cycle");
 
-    // start accepted when !busy → busy must be high next cycle.
+    //
+    // SVA-2: start accepted when !busy → busy must be high next cycle.
+    //
     property p_busy_after_start;
         @(posedge clk) disable iff (rst)
         (start && !busy) |=> busy;
     endproperty
     assert property (p_busy_after_start)
-    else $error("Assertion failed: busy not asserted after start");
+    else $error("[SVA] FAIL a_busy_after_start: busy not asserted after start");
 
-    // AXI-stream hold on input when stalled.
+    //
+    // SVA-3: AXI-stream hold on input when stalled.
     // s_data and s_valid must be stable while s_valid=1 and s_ready=0.
+    //
     property p_stream_in_stall;
         @(posedge clk) disable iff (rst)
         (s_valid && !s_ready) |=> ($stable(s_data) && s_valid);
     endproperty
     assert property (p_stream_in_stall)
-    else $error("Assertion failed: s_data changed or s_valid dropped while stalled");
+    else $error("[SVA] FAIL a_stream_in_stall: s_data changed or s_valid dropped while stalled");
 
-    // AXI-stream hold on hidden output when stalled.
+    //
+    // SVA-4: AXI-stream hold on hidden output when stalled.
+    //
     property p_hidden_out_stall;
         @(posedge clk) disable iff (rst)
         (!IS_OUTPUT_LAYER && m_valid && !m_ready) |=> ($stable(m_data) && m_valid);
     endproperty
     assert property (p_hidden_out_stall)
-    else $error("Assertion failed: m_data changed or m_valid dropped while stalled");
+    else $error("[SVA] FAIL a_hidden_out_stall: m_data changed or m_valid dropped while stalled");
 
-    // AXI-stream hold on score output when stalled.
+    //
+    // SVA-5: AXI-stream hold on score output when stalled.
+    //
     property p_score_out_stall;
         @(posedge clk) disable iff (rst)
         (IS_OUTPUT_LAYER && score_valid && !score_ready) |=>
             ($stable(score_data) && score_valid);
     endproperty
     assert property (p_score_out_stall)
-    else $error("Assertion failed: score_data changed while stalled");
+    else $error("[SVA] FAIL a_score_out_stall: score_data changed while stalled");
 
-    // Threshold write data upper bits must be zero. [H14]
+    //
+    // SVA-6: Threshold write data upper bits must be zero. [H14]
     // threshold is ACC_W bits but arrives as 32-bit cfg_thr_data; bits above
     // ACC_W are silently truncated. TB enforces only legal values are written.
+    //
     property p_thr_upper_zero;
         @(posedge clk) disable iff (rst)
         cfg_thr_valid |-> (cfg_thr_data[31:ACC_W] == '0);
     endproperty
     assert property (p_thr_upper_zero)
-    else $error("Assertion failed: cfg_thr_data[31:%0d] != 0 [H14]", ACC_W);
+    else $error("[SVA] FAIL a_thr_upper_zero: cfg_thr_data[31:%0d] != 0 [H14]", ACC_W);
 
-    // Internal NP valid must correspond to a previously accepted input
+    //
+    // SVA-7: Internal NP valid must correspond to a previously accepted input
     // beat. This closes the explicit [H17] engine-integration hazard.
+    //
     property p_np_valid_after_accept;
         @(posedge clk) disable iff (rst)
         DUT.np_valid_in |-> $past(DUT.buf_valid && DUT.buf_ready);
     endproperty
     assert property (p_np_valid_after_accept)
-    else $error("Assertion failed: np_valid_in without prior input accept");
+    else $error("[SVA] FAIL a_np_valid_after_accept: np_valid_in without prior input accept");
 
-    // The held NP input beat must equal the previously accepted replay
+    //
+    // SVA-8: The held NP input beat must equal the previously accepted replay
     // buffer beat when np_valid_in fires.
+    //
     property p_np_x_matches_accept;
         @(posedge clk) disable iff (rst)
         DUT.np_valid_in |-> (DUT.np_x_r_q == $past(DUT.buf_data));
     endproperty
     assert property (p_np_x_matches_accept)
-    else $error("Assertion failed: held x beat mismatched accepted beat");
+    else $error("[SVA] FAIL a_np_x_matches_accept: held x beat mismatched accepted beat");
 
+    //
     // Covergroups
+    //
 
     covergroup cg_lifecycle @(posedge clk);
         cp_busy  : coverpoint busy;
@@ -329,7 +364,9 @@ module tb_bnn_layer_engine;
     cg_stream_out cg_so = new();
     cg_geometry   cg_g  = new();
 
+    //
     // Reset task
+    //
     task automatic reset_dut(int cycles = 10);
         rst           <= 1'b1;
         start         <= 1'b0;
@@ -346,14 +383,19 @@ module tb_bnn_layer_engine;
         repeat (5) @(posedge clk);
     endtask
 
+    //
     // Config loader
+    //
     // Writes all weights and (if hidden mode) all thresholds into the DUT BRAMs
     // via the cfg_wr / cfg_thr ports.  Also writes into shadow arrays.
+    //
     // Weight layout: for NP j, address = pass*ITERS + iter stores the weight
     // word that lane j will use at that address (fed from BRAM during compute).
+    //
     // For the golden model to work, we index shadow_wt[j][addr] where
     // addr = pass*ITERS + iter.  The actual neuron processed by NP j at
     // pass p is neuron (p*P_N + j).
+    //
     task automatic load_config(
         input logic [P_W-1:0]   wt     [P_N][WT_DEPTH],
         input logic [ACC_W-1:0] thr    [P_N][PASSES]    // ignored if IS_OUTPUT_LAYER
@@ -380,7 +422,7 @@ module tb_bnn_layer_engine;
                     cfg_thr_layer <= LID_W'(LAYER_IDX);
                     cfg_thr_np    <= 16'(j);
                     cfg_thr_addr  <= 16'(p);
-                    // Upper bits MUST be zero per [H14] and assertion
+                    // Upper bits MUST be zero per [H14] and SVA-6
                     cfg_thr_data  <= 32'(thr[j][p]);
                 end
             end
@@ -389,9 +431,12 @@ module tb_bnn_layer_engine;
         repeat (3) @(posedge clk);
     endtask
 
+    //
     // Input stream driver
+    //
     // Drives ITERS beats of P_W-bit input data with s_valid/s_last.
     // valid_prob controls s_valid duty cycle (contest stress).
+    //
     task automatic drive_input_stream(
         input logic [P_W-1:0] img_data [ITERS],
         input real             valid_prob = 1.0
@@ -415,7 +460,9 @@ module tb_bnn_layer_engine;
         s_last  <= 1'b0;
     endtask
 
+    //
     // Output drain — waits until output_done or timeout
+    //
     task automatic drain_output(
         input real  ready_prob = 1.0,
         input int   timeout = 0
@@ -440,7 +487,9 @@ module tb_bnn_layer_engine;
               $sformatf("output_done not set after %0d cycles", tmo));
     endtask
 
+    //
     // Wait for done pulse with timeout
+    //
     task automatic wait_for_done(int timeout_cyc = 0);
         int tmo = (timeout_cyc == 0) ? IMAGE_TIMEOUT : timeout_cyc;
         int t = 0;
@@ -459,18 +508,24 @@ module tb_bnn_layer_engine;
         end
     endtask
 
+    //
     // Golden model
+    //
     // Computes expected output from the shadow RAMs and a provided image.
+    //
     // For hidden mode:
     //   For neuron n (= pass*P_N + lane_j):
     //     popcount[n] = sum_{i=0}^{ITERS-1} popcount(img[i] XNOR shadow_wt[j][pass*ITERS+i])
     //     activation[n] = (popcount[n] >= shadow_thr[j][pass])
     //   Pack into ceil(NUM_NEURONS / NEXT_P_W) output words LSB-first.
+    //
     // For output mode:
     //   score[n] = popcount[n]  (no threshold compare)
     //   score_data = all scores packed as {score[NUM_NEURONS-1], ..., score[0]}
+    //
     // Comparison: beat-accurate for hidden (compare out_beats[]), word compare
     // for output (compare out_score_beat).
+    //
     function automatic int popcount_pw(logic [P_W-1:0] v);
         int c = 0;
         for (int b = 0; b < P_W; b++) if (v[b]) c++;
@@ -546,7 +601,9 @@ module tb_bnn_layer_engine;
         end
     endtask
 
+    //
     // Run one complete image end-to-end
+    //
     task automatic run_image(
         input logic [P_W-1:0] img   [ITERS],
         input real             in_valid_prob  = 1.0,
@@ -576,7 +633,9 @@ module tb_bnn_layer_engine;
         repeat (5) @(posedge clk);
     endtask
 
+    //
     // Config initializer: all-zero weights, mid-range thresholds
+    //
     task automatic load_zero_weights_mid_thr();
         logic [P_W-1:0]   wt [P_N][WT_DEPTH];
         logic [ACC_W-1:0] th [P_N][PASSES];
@@ -598,43 +657,51 @@ module tb_bnn_layer_engine;
         load_config(wt, th);
     endtask
 
-    // �� Single image, all-zero weights → all activations 0 (hidden mode)
+    //
+    // T01 — Single image, all-zero weights → all activations 0 (hidden mode)
+    //
     task automatic test_t01_zero_weights();
         logic [P_W-1:0] img [ITERS];
-        $display("Running: zero weights, random image, hidden mode");
-        if (IS_OUTPUT_LAYER) begin $display("Skipped (IS_OUTPUT_LAYER=1)"); pass_count++; return; end
+        $display("[TEST] T01: zero weights, random image, hidden mode");
+        if (IS_OUTPUT_LAYER) begin $display("[T01] SKIPPED (IS_OUTPUT_LAYER=1)"); pass_count++; return; end
         reset_dut();
         load_zero_weights_mid_thr();
         for (int i = 0; i < ITERS; i++) img[i] = P_W'($urandom());
         run_image(img, 1.0, 1.0, "T01_zero_weights");
     endtask
 
-    // �� Single image, random weights, hidden mode
+    //
+    // T02 — Single image, random weights, hidden mode
+    //
     task automatic test_t02_random_hidden();
         logic [P_W-1:0] img [ITERS];
-        $display("Running: random weights, random image, hidden mode");
-        if (IS_OUTPUT_LAYER) begin $display("Skipped (IS_OUTPUT_LAYER=1)"); pass_count++; return; end
+        $display("[TEST] T02: random weights, random image, hidden mode");
+        if (IS_OUTPUT_LAYER) begin $display("[T02] SKIPPED (IS_OUTPUT_LAYER=1)"); pass_count++; return; end
         reset_dut();
         load_random_config();
         for (int i = 0; i < ITERS; i++) img[i] = P_W'($urandom());
         run_image(img, 1.0, 1.0, "T02_random_hidden");
     endtask
 
-    // �� Single image, output mode
+    //
+    // T03 — Single image, output mode
+    //
     task automatic test_t03_output_mode();
         logic [P_W-1:0] img [ITERS];
-        $display("Running: random weights, output mode");
-        if (!IS_OUTPUT_LAYER) begin $display("Skipped (IS_OUTPUT_LAYER=0)"); pass_count++; return; end
+        $display("[TEST] T03: random weights, output mode");
+        if (!IS_OUTPUT_LAYER) begin $display("[T03] SKIPPED (IS_OUTPUT_LAYER=0)"); pass_count++; return; end
         reset_dut();
         load_random_config();
         for (int i = 0; i < ITERS; i++) img[i] = P_W'($urandom());
         run_image(img, 1.0, 1.0, "T03_output_mode");
     endtask
 
-    // Back-to-back images, no gap
+    //
+    // T04 — Back-to-back images, no gap
+    //
     task automatic test_t04_back_to_back();
         logic [P_W-1:0] img [ITERS];
-        $display("Running: %0d back-to-back images", B2B_IMAGES);
+        $display("[TEST] T04: %0d back-to-back images", B2B_IMAGES);
         reset_dut();
         load_random_config();
         for (int n = 0; n < B2B_IMAGES; n++) begin
@@ -643,30 +710,36 @@ module tb_bnn_layer_engine;
         end
     endtask
 
-    // Input backpressure: contest stress (valid_prob=0.8)
+    //
+    // T05 — Input backpressure: contest stress (valid_prob=0.8)
+    //
     task automatic test_t05_input_bp();
         logic [P_W-1:0] img [ITERS];
-        $display("Running: input backpressure valid_prob=0.8");
+        $display("[TEST] T05: input backpressure valid_prob=0.8");
         reset_dut();
         load_random_config();
         for (int i = 0; i < ITERS; i++) img[i] = P_W'($urandom());
         run_image(img, 0.8, 1.0, "T05_in_bp");
     endtask
 
-    // Output backpressure: contest stress (ready_prob=0.5)
+    //
+    // T06 — Output backpressure: contest stress (ready_prob=0.5)
+    //
     task automatic test_t06_output_bp();
         logic [P_W-1:0] img [ITERS];
-        $display("Running: output backpressure ready_prob=0.5");
+        $display("[TEST] T06: output backpressure ready_prob=0.5");
         reset_dut();
         load_random_config();
         for (int i = 0; i < ITERS; i++) img[i] = P_W'($urandom());
         run_image(img, 1.0, 0.5, "T06_out_bp");
     endtask
 
-    // Combined contest stress: in=0.8, out=0.5
+    //
+    // T07 — Combined contest stress: in=0.8, out=0.5
+    //
     task automatic test_t07_contest_stress();
         logic [P_W-1:0] img [ITERS];
-        $display("Running: combined contest stress (in=0.8, out=0.5), %0d images",
+        $display("[TEST] T07: combined contest stress (in=0.8, out=0.5), %0d images",
                  CONTEST_IMAGES);
         reset_dut();
         load_random_config();
@@ -676,12 +749,14 @@ module tb_bnn_layer_engine;
         end
     endtask
 
-    // start ignored while busy
+    //
+    // T08 — start ignored while busy
+    //
     task automatic test_t08_start_while_busy();
         logic [P_W-1:0] img [ITERS];
         int   extra_done;
         int   busy_reassert;
-        $display("Running: start pulse while busy must be ignored");
+        $display("[TEST] T08: start pulse while busy must be ignored");
         reset_dut();
         load_random_config();
         for (int i = 0; i < ITERS; i++) img[i] = P_W'($urandom());
@@ -718,10 +793,12 @@ module tb_bnn_layer_engine;
               $sformatf("busy reasserted for %0d cycles after completion", busy_reassert));
     endtask
 
-    // Reset mid-image then clean recovery
+    //
+    // T09 — Reset mid-image then clean recovery
+    //
     task automatic test_t09_reset_recovery();
         logic [P_W-1:0] img [ITERS];
-        $display("Running: reset mid-image then clean recovery");
+        $display("[TEST] T09: reset mid-image then clean recovery");
         reset_dut();
         load_random_config();
         for (int i = 0; i < ITERS; i++) img[i] = P_W'($urandom());
@@ -755,12 +832,14 @@ module tb_bnn_layer_engine;
         run_image(img, 1.0, 1.0, "T09_clean_after_reset");
     endtask
 
-    // Config write to wrong layer: shadow unchanged
+    //
+    // T10 — Config write to wrong layer: shadow unchanged
+    //
     task automatic test_t10_wrong_layer_write();
         int wrong_layer;
         logic [P_W-1:0] original_wt [P_N][WT_DEPTH];
         logic [P_W-1:0] img [ITERS];
-        $display("Running: config write to wrong layer, weights unchanged");
+        $display("[TEST] T10: config write to wrong layer, weights unchanged");
         reset_dut();
         load_random_config();
 
@@ -799,7 +878,9 @@ module tb_bnn_layer_engine;
         run_image(img, 1.0, 1.0, "T10_orig_weights_still_valid");
     endtask
 
+    //
     // Main test sequence
+    //
     initial begin
         $display("=====================================================");
         $display(" tb_bnn_layer_engine — Level-1 CRV + Golden Model");

@@ -39,17 +39,17 @@ module bnn_activation_packer_dp #(
     output logic                  m_last
 );
 
-    // Registers
+    
     logic [ACCUM_W-1:0]   accum_r_q;
     logic [BIT_CNT_W-1:0] bits_in_r_q;
     logic [OUT_BITS-1:0]  m_data_r_q;
     logic                 m_valid_r_q;
     logic                 m_last_r_q;
-    // flushing_r_q is declared in the port list
+    // flushing_r_q declared as output above
 
     logic flushing_next;
 
-    // Input alignment (left barrel shift)
+    
     logic [IN_BITS-1:0]  s_data_masked;
     logic [ACCUM_W-1:0]  shifted_input;
     always_comb begin
@@ -61,7 +61,7 @@ module bnn_activation_packer_dp #(
     end
     assign shifted_input = ACCUM_W'(s_data_masked) << bits_in_r_q;
 
-    // Accumulator combinational paths
+    
     logic [ACCUM_W-1:0] merge_result;
     logic [ACCUM_W-1:0] drained_accum;
     logic [ACCUM_W-1:0] accum_next;
@@ -86,7 +86,7 @@ module bnn_activation_packer_dp #(
             accum_r_q <= '0;
     end
 
-    // Bit counter
+    
     logic [BIT_CNT_W-1:0] bits_in_next;
 
     assign bits_after_merge = bits_in_r_q + BIT_CNT_W'(s_count);
@@ -111,7 +111,8 @@ module bnn_activation_packer_dp #(
             bits_in_r_q <= '0;
     end
 
-    // Output registers     // m_data and m_last: gated by out_we
+    
+    // m_data and m_last: gated by out_we
     always_ff @(posedge clk) begin
         if (out_we) begin
             if (!(m_valid_r_q && !m_ready)) begin
@@ -126,7 +127,7 @@ module bnn_activation_packer_dp #(
         end
     end
 
-    // m_valid is always clocked (FSM drives out_valid_d every cycle)
+    // m_valid: always clocked (D-input driven by FSM every cycle)
     always_ff @(posedge clk) begin
         if (m_valid_r_q) begin
             if (m_ready)
@@ -141,7 +142,7 @@ module bnn_activation_packer_dp #(
             m_valid_r_q <= 1'b0;
     end
 
-    // Flushing flag set/clear by FSM
+    // flushing flag: set/clear by FSM
     always_comb begin
         if (flush_set)
             flushing_next = 1'b1;
@@ -158,7 +159,7 @@ module bnn_activation_packer_dp #(
             flushing_r_q <= 1'b0;
     end
 
-    // Output assignments
+    
     assign m_valid = m_valid_r_q;
     assign m_data  = m_data_r_q;
     assign m_last  = m_last_r_q;

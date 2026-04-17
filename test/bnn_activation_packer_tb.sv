@@ -2,7 +2,9 @@
 
 module bnn_activation_packer_tb;
 
-    //Parameters
+    //
+    // Parameters
+    //
     parameter int IN_BITS  = 8;
     parameter int OUT_BITS = 8;
 
@@ -11,7 +13,9 @@ module bnn_activation_packer_tb;
     localparam int CNT_W     = $clog2(IN_BITS + 1);
     localparam int RANDOM_GROUPS = 10000;
 
-    //DUT Interface Signals
+    //
+    // DUT Interface Signals
+    //
     logic               clk = 0;
     logic               rst = 1;
     logic               s_valid;
@@ -24,10 +28,14 @@ module bnn_activation_packer_tb;
     logic [OUT_BITS-1:0] m_data;
     logic               m_last;
 
-    //Clock Generation (100 MHz)
+    //
+    // Clock Generation (100 MHz)
+    //
     always #5 clk = ~clk;
 
-    //DUT Instantiation
+    //
+    // DUT Instantiation
+    //
     bnn_activation_packer #(
         .IN_BITS  (IN_BITS),
         .OUT_BITS (OUT_BITS)
@@ -45,92 +53,108 @@ module bnn_activation_packer_tb;
         .m_last       (m_last)
     );
 
-    //SVA Properties (Gray Box)
+    //
+    // SVA Properties (Gray Box)
+    //
 
-    //AXI-Stream valid-hold on master interface -- once m_valid asserts,
-    //it stays high until m_ready completes the handshake.
-    //RATIONALE: AXI4-Stream protocol compliance for downstream consumers.
+    //
+    // SVA-1: AXI-Stream valid-hold on master interface -- once m_valid asserts,
+    // it stays high until m_ready completes the handshake.
+    // RATIONALE: AXI4-Stream protocol compliance for downstream consumers.
+    //
     property p_m_valid_hold;
         @(posedge clk) disable iff (rst)
         (m_valid && !m_ready) |=> m_valid;
     endproperty
     assert property (p_m_valid_hold)
-    else $error("[assertion] FAIL: m_valid dropped without m_ready handshake");
+    else $error("[SVA] FAIL: m_valid dropped without m_ready handshake");
 
-    //m_data stable during m_valid && !m_ready -- data must not change
-    //while the handshake is stalled.
-    //RATIONALE: AXI4-Stream data stability requirement.
+    //
+    // SVA-2: m_data stable during m_valid && !m_ready -- data must not change
+    // while the handshake is stalled.
+    // RATIONALE: AXI4-Stream data stability requirement.
+    //
     property p_m_data_stable;
         @(posedge clk) disable iff (rst)
         (m_valid && !m_ready) |=> $stable(m_data);
     endproperty
     assert property (p_m_data_stable)
-    else $error("[assertion] FAIL: m_data changed during backpressure");
+    else $error("[SVA] FAIL: m_data changed during backpressure");
 
-    //bits_in_r_q never exceeds ACCUM_W -- the accumulator bit counter
-    //must stay within the defined width to prevent data corruption.
-    //RATIONALE: Accumulator overflow would cause bits to be lost or aliased.
+    //
+    // SVA-3: bits_in_r_q never exceeds ACCUM_W -- the accumulator bit counter
+    // must stay within the defined width to prevent data corruption.
+    // RATIONALE: Accumulator overflow would cause bits to be lost or aliased.
+    //
     property p_no_accumulator_overflow;
         @(posedge clk) disable iff (rst)
         DUT.u_dp.bits_in_r_q <= BIT_CNT_W'(ACCUM_W);
     endproperty
     assert property (p_no_accumulator_overflow)
-    else $error("[assertion] FAIL: bits_in_r_q=%0d exceeded ACCUM_W=%0d",
+    else $error("[SVA] FAIL: bits_in_r_q=%0d exceeded ACCUM_W=%0d",
                 DUT.u_dp.bits_in_r_q, ACCUM_W);
 
-    //m_last stable during backpressure
-    //RATIONALE: Like m_data, m_last must hold until consumed.
+    //
+    // SVA-4: m_last stable during backpressure
+    // RATIONALE: Like m_data, m_last must hold until consumed.
+    //
     property p_m_last_stable;
         @(posedge clk) disable iff (rst)
         (m_valid && !m_ready) |=> $stable(m_last);
     endproperty
     assert property (p_m_last_stable)
-    else $error("[assertion] FAIL: m_last changed during backpressure");
+    else $error("[SVA] FAIL: m_last changed during backpressure");
 
-    //s_ready deasserts during EMIT and FLUSH states -- packer cannot
-    //accept new input while emitting output.
-    //RATIONALE: Prevents accumulator corruption from overlapping merge/drain.
+    //
+    // SVA-5: s_ready deasserts during EMIT and FLUSH states -- packer cannot
+    // accept new input while emitting output.
+    // RATIONALE: Prevents accumulator corruption from overlapping merge/drain.
+    //
     property p_s_ready_deassert_emit;
         @(posedge clk) disable iff (rst)
         (DUT.u_fsm.state_r == DUT.u_fsm.EMIT ||
          DUT.u_fsm.state_r == DUT.u_fsm.FLUSH) |-> !s_ready;
     endproperty
     assert property (p_s_ready_deassert_emit)
-    else $error("[assertion] FAIL: s_ready asserted during EMIT/FLUSH state");
+    else $error("[SVA] FAIL: s_ready asserted during EMIT/FLUSH state");
 
-    //Covergroups (Gray Box)
+    //
+    // Covergroups (Gray Box)
+    //
 
-    //COVERGROUP: Bit accumulation levels, s_count values, s_last_group,
-    //and emit backpressure events.
+    //
+    // COVERGROUP: Bit accumulation levels, s_count values, s_last_group,
+    // and emit backpressure events.
+    //
     covergroup cg_packer @(posedge clk iff (!rst));
-        //Cover bits_in accumulator levels
+        // Cover bits_in accumulator levels
         cp_bits_in: coverpoint DUT.u_dp.bits_in_r_q {
             bins empty    = {0};
             bins partial  = {[1:OUT_BITS-1]};
-            //By construction the packer emits once OUT_BITS are available,
-            //so ACCUM_W itself is not a reachable steady-state count.
+            // By construction the packer emits once OUT_BITS are available,
+            // so ACCUM_W itself is not a reachable steady-state count.
             bins can_emit = {[OUT_BITS:ACCUM_W-1]};
         }
 
-        //Cover s_count values
+        // Cover s_count values
         cp_s_count: coverpoint s_count iff (s_valid && s_ready) {
             bins full_count = {IN_BITS};
             bins partial    = {[1:IN_BITS-1]};
         }
 
-        //Cover s_last_group
+        // Cover s_last_group
         cp_last_group: coverpoint s_last_group iff (s_valid && s_ready) {
             bins normal = {0};
             bins final_g = {1};
         }
 
-        //Cover emit backpressure
+        // Cover emit backpressure
         cp_emit_stall: coverpoint {m_valid, m_ready} {
             bins stall = {2'b10};
             bins flow  = {2'b11};
         }
 
-        //Cover FSM states
+        // Cover FSM states
         cp_state: coverpoint DUT.u_fsm.state_r {
             bins idle    = {DUT.u_fsm.IDLE};
             bins accept  = {DUT.u_fsm.ACCEPT};
@@ -142,14 +166,16 @@ module bnn_activation_packer_tb;
 
     cg_packer cg_inst = new();
 
-    //Reference Model: Bit-accurate packing
-    //Collect all input bits, then extract OUT_BITS words from the stream.
-    //A queue avoids artificial overflow in long stress runs.
+    //
+    // Reference Model: Bit-accurate packing
+    //
+    // Collect all input bits, then extract OUT_BITS words from the stream.
+    // A queue avoids artificial overflow in long stress runs.
     logic                ref_bit_stream[$];
     logic [OUT_BITS-1:0] ref_output_queue[$];
     logic                ref_last_queue[$];
 
-    //Call after all inputs sent to build expected output queue
+    // Call after all inputs sent to build expected output queue
     task automatic build_ref_output(
         input logic [IN_BITS-1:0] data_q[$],
         input int                 count_q[$],
@@ -160,14 +186,14 @@ module bnn_activation_packer_tb;
         ref_bit_stream = {};
         bit_pos = 0;
 
-        //Accumulate all input bits
+        // Accumulate all input bits
         for (int g = 0; g < data_q.size(); g++) begin
             for (int b = 0; b < count_q[g]; b++)
                 ref_bit_stream.push_back(data_q[g][b]);
         end
         total_bits = ref_bit_stream.size();
 
-        //Extract OUT_BITS words
+        // Extract OUT_BITS words
         ref_output_queue = {};
         ref_last_queue   = {};
         bit_pos = 0;
@@ -180,7 +206,7 @@ module bnn_activation_packer_tb;
             bit_pos += OUT_BITS;
         end
 
-        //Handle residual bits (flush with zero-padding)
+        // Handle residual bits (flush with zero-padding)
         if (bit_pos < total_bits) begin
             logic [OUT_BITS-1:0] word;
             word = '0;
@@ -189,12 +215,14 @@ module bnn_activation_packer_tb;
             ref_output_queue.push_back(word);
             ref_last_queue.push_back(1'b1);
         end else if (ref_output_queue.size() > 0) begin
-            //Mark last full word as m_last
+            // Mark last full word as m_last
             ref_last_queue[ref_last_queue.size()-1] = 1'b1;
         end
     endtask
 
-    //Scoreboard
+    //
+    // Scoreboard
+    //
     int pass_count_sb = 0;
     int fail_count_sb = 0;
     string fail_log[$];
@@ -209,7 +237,7 @@ module bnn_activation_packer_tb;
         end
     endfunction
 
-    //Monitor: collect actual output
+    // Monitor: collect actual output
     logic [OUT_BITS-1:0] actual_data_q[$];
     logic                actual_last_q[$];
 
@@ -220,7 +248,7 @@ module bnn_activation_packer_tb;
         end
     end
 
-    //Compare actual vs expected
+    // Compare actual vs expected
     task automatic compare_output(string test_name);
         int min_size;
         check($sformatf("%s_output_count", test_name),
@@ -240,12 +268,14 @@ module bnn_activation_packer_tb;
                   $sformatf("exp_last=%b got_last=%b", ref_last_queue[i], actual_last_q[i]));
         end
 
-        //Clear for next test
+        // Clear for next test
         actual_data_q = {};
         actual_last_q = {};
     endtask
 
-    //Reset Task
+    //
+    // Reset Task
+    //
     task automatic reset_dut();
         rst          <= 1'b1;
         s_valid      <= 1'b0;
@@ -260,7 +290,9 @@ module bnn_activation_packer_tb;
         repeat (3) @(posedge clk);
     endtask
 
-    //Helper: Send a sequence of groups through the packer
+    //
+    // Helper: Send a sequence of groups through the packer
+    //
     task automatic send_groups(
         input logic [IN_BITS-1:0] data_q[$],
         input int                 count_q[$],
@@ -269,7 +301,7 @@ module bnn_activation_packer_tb;
     );
         int timeout;
         for (int g = 0; g < data_q.size(); g++) begin
-            //Wait for ACCEPT state
+            // Wait for ACCEPT state
             timeout = 0;
             while (!s_ready && timeout < 5000) begin
                 @(posedge clk);
@@ -292,8 +324,8 @@ module bnn_activation_packer_tb;
             s_valid      <= 1'b0;
             s_last_group <= 1'b0;
         end
-        //Drain remaining outputs. Do not break early on ACCEPT/IDLE;
-        //the final flush/result can appear a cycle later.
+        // Drain remaining outputs. Do not break early on ACCEPT/IDLE;
+        // the final flush/result can appear a cycle later.
         repeat (64) begin
             @(posedge clk);
             m_ready <= 1'b1;
@@ -302,9 +334,11 @@ module bnn_activation_packer_tb;
         m_ready <= 1'b0;
     endtask
 
-    //Test Scenarios
+    //
+    // Test Scenarios
+    //
 
-    // Exact alignment (IN_BITS == OUT_BITS, full count)
+    //--- Test 1: Exact alignment (IN_BITS == OUT_BITS, full count) ------------
     task automatic test_exact_alignment();
         logic [IN_BITS-1:0] data_q[$];
         int count_q[$];
@@ -320,7 +354,7 @@ module bnn_activation_packer_tb;
         compare_output("exact_align");
     endtask
 
-    // Partial final pass (s_count < IN_BITS with s_last_group)
+    //--- Test 2: Partial final pass (s_count < IN_BITS with s_last_group) -----
     task automatic test_partial_final();
         logic [IN_BITS-1:0] data_q[$];
         int count_q[$];
@@ -336,14 +370,14 @@ module bnn_activation_packer_tb;
         compare_output("partial_final");
     endtask
 
-    // Flush with zero residual
+    //--- Test 3: Flush with zero residual -------------------------------------
     task automatic test_flush_zero_residual();
         logic [IN_BITS-1:0] data_q[$];
         int count_q[$];
         logic last_group_q[$];
         $display("[TEST] test_flush_zero_residual: exact multiple of OUT_BITS");
 
-        //2 groups of 8 bits = 16 bits total = 2 output words, no residual
+        // 2 groups of 8 bits = 16 bits total = 2 output words, no residual
         data_q = {8'hAB, 8'hCD};
         count_q = {IN_BITS, IN_BITS};
         last_group_q = {1'b0, 1'b1};
@@ -353,7 +387,7 @@ module bnn_activation_packer_tb;
         compare_output("flush_zero_residual");
     endtask
 
-    // Backpressure during emit
+    //--- Test 4: Backpressure during emit -------------------------------------
     task automatic test_backpressure_emit();
         logic [IN_BITS-1:0] data_q[$];
         int count_q[$];
@@ -369,7 +403,7 @@ module bnn_activation_packer_tb;
         compare_output("bp_emit");
     endtask
 
-    // Single group with s_last_group
+    //--- Test 5: Single group with s_last_group -------------------------------
     task automatic test_single_group();
         logic [IN_BITS-1:0] data_q[$];
         int count_q[$];
@@ -385,7 +419,7 @@ module bnn_activation_packer_tb;
         compare_output("single_group");
     endtask
 
-    // Count sweep closure -- walk partial accumulation states
+    //--- Test 6: Count sweep closure -- walk partial accumulation states ------
     task automatic test_count_sweep();
         logic [IN_BITS-1:0] data_q[$];
         int count_q[$];
@@ -407,7 +441,7 @@ module bnn_activation_packer_tb;
         compare_output("count_sweep");
     endtask
 
-    // Many groups (stress)
+    //--- Test 7: Many groups (stress) -----------------------------------------
     task automatic test_stress();
         logic [IN_BITS-1:0] data_q[$];
         int count_q[$];
@@ -429,7 +463,7 @@ module bnn_activation_packer_tb;
         compare_output("stress");
     endtask
 
-    // Multiple images back-to-back
+    //--- Test 7: Multiple images back-to-back ---------------------------------
     task automatic test_multi_image();
         $display("[TEST] test_multi_image: 5 images back-to-back");
 
@@ -452,12 +486,14 @@ module bnn_activation_packer_tb;
             send_groups(data_q, count_q, last_group_q, 0.8);
             compare_output($sformatf("multi_img_%0d", img));
 
-            //Wait for IDLE
+            // Wait for IDLE
             repeat (10) @(posedge clk);
         end
     endtask
 
-    //Main Test Sequence
+    //
+    // Main Test Sequence
+    //
     initial begin
         $display("============================================================");
         $display("  bnn_activation_packer Testbench (CRV+, Gray-Box)");
@@ -492,7 +528,9 @@ module bnn_activation_packer_tb;
 
         repeat (20) @(posedge clk);
 
-        //Scoreboard Summary
+        //
+        // Scoreboard Summary
+        //
         $display("");
         $display("============================================================");
         $display("  SCOREBOARD SUMMARY -- bnn_activation_packer");

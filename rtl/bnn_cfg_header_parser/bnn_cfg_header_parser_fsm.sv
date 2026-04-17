@@ -38,7 +38,7 @@ module bnn_cfg_header_parser_fsm (
 
     state_t state_r, next_state;
 
-    // State register 
+    
     always_ff @(posedge clk) begin
         state_r <= next_state;
 
@@ -46,7 +46,7 @@ module bnn_cfg_header_parser_fsm (
             state_r <= IDLE;
     end
 
-    // Next state + output logic 
+    
     always_comb begin
         next_state       = state_r;
         byte_ready       = 1'b0;

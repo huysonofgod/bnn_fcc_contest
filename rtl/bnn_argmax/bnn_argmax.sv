@@ -9,20 +9,20 @@ module bnn_argmax #(
     input  logic                           clk,
     input  logic                           rst,
 
-    // Input: one score vector per valid beat
+    
     input  logic                           s_valid,
     output logic                           s_ready,
     input  logic [NUM_CLASSES*ACC_W-1:0]   s_scores,
     input  logic                           s_last,
 
-    // Output: argmax index
+    
     output logic                           m_valid,
     input  logic                           m_ready,
     output logic [IDX_W-1:0]               m_idx,
     output logic                           m_last
 );
 
-    // Per-stage live count (compile-time)
+    
     function automatic int stage_cnt(input int s);
         int c;
         c = NUM_CLASSES;
@@ -31,15 +31,15 @@ module bnn_argmax #(
         return c;
     endfunction
 
-    // Pipeline storage: [stage][lane]
-    // Every stage register array is sized to NUM_CLASSES lanes for simplicity.
-    // Only the first stage_cnt(s) lanes carry meaningful data at stage s.
+    
+    // Every stage register array is sized to NUM_CLASSES lanes for simplicity;
+    // only the first stage_cnt(s) lanes carry meaningful data at stage s.
     logic [IDX_W-1:0]  idx_r_q   [STAGES+1][NUM_CLASSES];
     logic [ACC_W-1:0]  score_r_q [STAGES+1][NUM_CLASSES];
     logic              valid_r_q [STAGES+1];
     logic              last_r_q  [STAGES+1];
 
-    // Global pipeline enable (stall on occupied output slot)
+    // Global pipeline enable (stall on occupied output slot).
     logic pipe_en;
     logic out_valid_r_q;
     logic [IDX_W-1:0] out_idx_r_q;
@@ -48,7 +48,7 @@ module bnn_argmax #(
     assign pipe_en = ~out_valid_r_q | m_ready;
     assign s_ready = pipe_en;
 
-    // Stage 0: register input lanes verbatim
+    
     genvar gi, gs;
     generate
         for (gi = 0; gi < NUM_CLASSES; gi++) begin : g_stage0
@@ -78,7 +78,7 @@ module bnn_argmax #(
         end
     end
 
-    // Stages 1..STAGES: 2-way reduction
+    
     generate
         for (gs = 0; gs < STAGES; gs++) begin : g_stage
             localparam int CNT_IN  = stage_cnt(gs);
@@ -95,7 +95,7 @@ module bnn_argmax #(
                 assign a_sc  = score_r_q[gs][2*gi];
                 assign b_sc  = score_r_q[gs][2*gi + 1];
 
-                // First-wins tie-break: a_idx < b_idx, so >= picks a on ties.
+                // First-wins tie-break: a_idx < b_idx, so `>=` picks a on ties.
                 assign w_idx = (a_sc >= b_sc) ? a_idx : b_idx;
                 assign w_sc  = (a_sc >= b_sc) ? a_sc  : b_sc;
 
@@ -127,7 +127,7 @@ module bnn_argmax #(
             end
 
             // Lanes above CNT_OUT at stage gs+1 are never read by later stages
-            // or by the output, so leaving them undriven lets synthesis prune.
+            // or by the output; leaving them undriven lets synthesis prune them.
 
             always_ff @(posedge clk) begin
                 if (pipe_en) begin
@@ -143,7 +143,7 @@ module bnn_argmax #(
         end
     endgenerate
 
-    // Output register
+    
     always_ff @(posedge clk) begin
         if (pipe_en) begin
             out_valid_r_q <= valid_r_q[STAGES];
@@ -162,7 +162,7 @@ module bnn_argmax #(
     assign m_idx   = out_idx_r_q;
     assign m_last  = out_last_r_q;
 
-    // Compile-time sanity checks
+    
     initial begin
         assert (NUM_CLASSES >= 2) else $fatal(1, "bnn_argmax: NUM_CLASSES must be >= 2");
         assert (ACC_W >= 1) else $fatal(1, "bnn_argmax: ACC_W must be >= 1");

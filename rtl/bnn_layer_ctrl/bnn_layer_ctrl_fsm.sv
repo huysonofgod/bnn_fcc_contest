@@ -35,7 +35,7 @@ module bnn_layer_ctrl_fsm #(
     output logic s_ready
 );
 
-    // State encoding
+    
     typedef enum logic [2:0] {
         IDLE      = 3'd0,
         LOAD_THR  = 3'd1,
@@ -51,7 +51,7 @@ module bnn_layer_ctrl_fsm #(
     localparam int WAIT_RELOAD = (RESULT_WAIT_CYCLES > 0) ? (RESULT_WAIT_CYCLES - 1) : 0;
     logic [WAIT_W-1:0] wait_cnt_r_q;
 
-    // State register (sequential)
+    
     always_ff @(posedge clk) begin
         state_r <= next_state;
         if (state_r != WAIT_RESULT)
@@ -65,7 +65,7 @@ module bnn_layer_ctrl_fsm #(
         end
     end
 
-    // Next-state and output logic (combinational)
+    
     always_comb begin
         // Default all outputs off
         next_state      = state_r;

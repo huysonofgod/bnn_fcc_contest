@@ -5,11 +5,12 @@ module bnn_fcc #(
     parameter int OUTPUT_DATA_WIDTH = 4,
     parameter int OUTPUT_BUS_WIDTH  = 8,
 
-    parameter int TOTAL_LAYERS = 4,  // Includes input, hidden, and output
-    parameter int TOPOLOGY[TOTAL_LAYERS] = '{0: 784, 1: 256, 2: 256, 3: 10, default: 0},  // 0: input, TOTAL_LAYERS-1: output
+    parameter int TOTAL_LAYERS = 4,
+    parameter int TOPOLOGY[TOTAL_LAYERS] = '{0: 784, 1: 256, 2: 256, 3: 10, default: 0},
 
     parameter int PARALLEL_INPUTS = 8,
-    parameter int PARALLEL_NEURONS[TOTAL_LAYERS-1] = '{default: 8}
+    parameter int PARALLEL_NEURONS[TOTAL_LAYERS-1] = '{default: 8},
+    parameter int FANOUT_STAGES = 1
 ) (
     input logic clk,
     input logic rst,
@@ -36,11 +37,17 @@ module bnn_fcc #(
     output logic                          data_out_last
 );
 
-    // -------------------------------------------------------------------------
+    localparam int NLY = TOTAL_LAYERS - 1;
+    localparam int LID_W = (NLY > 1) ? $clog2(NLY) : 1;
+    localparam int NUM_CLASSES = TOPOLOGY[TOTAL_LAYERS-1];
+    localparam int ARG_IDX_W = (NUM_CLASSES > 1) ? $clog2(NUM_CLASSES) : 1;
+    localparam int ACC_W = $clog2(TOPOLOGY[0] + 1);
+    localparam int MAX_STREAM_W = 256;
+    localparam int MAX_CFG_PW = 16;
+    localparam int NPID_W = 16;
+    localparam int ADDR_W = 16;
+
     // Small constant helpers for per-layer width derivation.
-    // These use fixed-size parameter arrays in constant contexts, which Questa
-    // accepts reliably for generate-time localparams.
-    // -------------------------------------------------------------------------
     function automatic int layer_pw_const(input int idx);
         if (idx == 0)
             return PARALLEL_INPUTS;
@@ -51,11 +58,7 @@ module bnn_fcc #(
         return PARALLEL_NEURONS[idx];
     endfunction
 
-    // -------------------------------------------------------------------------
-    // Configuration manager.
-    // It emits per-layer arrays, and each layer engine gets only its matching
-    // index. Layer engines still check cfg_wr_layer/cfg_thr_layer internally.
-    // -------------------------------------------------------------------------
+    // Configuration manager signals.
     logic [NLY-1:0]                 cfg_wr_valid;
     logic [NLY-1:0]                 cfg_wr_ready;
     logic [NLY-1:0][LID_W-1:0]      cfg_wr_layer;
@@ -116,10 +119,7 @@ module bnn_fcc #(
         .cfg_extra_t2_count (cfg_extra_t2_count)
     );
 
-    // latch cfg_done and feed it as a level-sensitive start to
-    // every layer. Layer FSMs only sample start in IDLE, so holding it high
-    // allows each layer to auto-restart for the next image without extra
-    // per-layer top-level control state.
+    // Latch cfg_done and feed it as a level-sensitive start to every layer.
     always_ff @(posedge clk) begin
         if (cfg_done)
             cfg_done_r_q <= 1'b1;
@@ -136,11 +136,7 @@ module bnn_fcc #(
         end
     endgenerate
 
-    // -------------------------------------------------------------------------
     // Image front end.
-    // Address generator maps one input beat directly to one PARALLEL_INPUTS word, this
-    // implementation requires INPUT_BUS_WIDTH/INPUT_DATA_WIDTH == PARALLEL_INPUTS.
-    // -------------------------------------------------------------------------
     logic                     pix_valid;
     logic                     pix_ready;
     logic [PARALLEL_INPUTS-1:0] pix_data;
@@ -150,12 +146,7 @@ module bnn_fcc #(
     logic [PARALLEL_INPUTS-1:0] pix_buf_data;
     logic                     pix_buf_last;
 
-    // -------------------------------------------------------------------------
     // Stream buses between the front end, inter-layer buffers, and engines.
-    // Data is padded to MAX_STREAM_W; each instance slices only its own width.
-    // These declarations appear before the image buffer because its m_ready is
-    // driven by layer_in_ready[0].
-    // -------------------------------------------------------------------------
     logic [NLY-1:0]                    layer_in_valid;
     logic [NLY-1:0]                    layer_in_ready;
     logic [NLY-1:0][MAX_STREAM_W-1:0]  layer_in_data;
@@ -206,10 +197,7 @@ module bnn_fcc #(
     assign layer_in_data [0] = {{(MAX_STREAM_W-PARALLEL_INPUTS){1'b0}}, pix_buf_data};
     assign layer_in_last [0] = pix_buf_last;
 
-    // -------------------------------------------------------------------------
-    // layer start policy: one level-sensitive signal to every layer.
-    // No per-layer derived start registers are permitted.
-    // -------------------------------------------------------------------------
+    // Layer start policy.
     logic [NLY-1:0] layer_start;
     logic [NLY-1:0] layer_busy;
     logic [NLY-1:0] layer_done;
@@ -223,10 +211,7 @@ module bnn_fcc #(
         end
     endgenerate
 
-    // -------------------------------------------------------------------------
-    // Inter-layer buffers. There is one buffer between each pair of adjacent
-    // layer engines. The output layer has no hidden-output buffer.
-    // -------------------------------------------------------------------------
+    // Inter-layer buffers.
     genvar gb;
     generate
         for (gb = 0; gb < (NLY > 1 ? NLY-1 : 0); gb++) begin : g_interbuf
@@ -254,14 +239,9 @@ module bnn_fcc #(
         end
     endgenerate
 
-    // Unused hidden output of the final layer is always ready/ignored.
     assign hidden_ready[NLY-1] = 1'b1;
 
-    // -------------------------------------------------------------------------
     // Layer engines.
-    // This generate loop is depth-parametric. Each instance derives its local
-    // P_W/P_N/FAN_IN/NUM_NEURONS from the public arrays.
-    // -------------------------------------------------------------------------
     logic                            score_valid;
     logic                            score_ready;
     logic [NUM_CLASSES*ACC_W-1:0]    score_data;
@@ -341,11 +321,7 @@ module bnn_fcc #(
         end
     endgenerate
 
-    // -------------------------------------------------------------------------
     // Argmax + top-level AXI output register.
-    // This is the only producer-facing top-level register. It enforces AXI
-    // valid/data/last/keep persistence under data_out_ready backpressure.
-    // -------------------------------------------------------------------------
     logic                 arg_valid;
     logic                 arg_ready;
     logic [ARG_IDX_W-1:0] arg_idx;

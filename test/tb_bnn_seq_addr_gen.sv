@@ -1,4 +1,4 @@
-`timescale 1ns/1ps
+`timescale 1ns/10ps
 
 //Compile-time parameter overrides — set by the sweep script via +define
 `ifndef SAG_TB_P_W
@@ -64,10 +64,10 @@ module tb_bnn_seq_addr_gen;
     logic [NP_CNT_W-1:0]   valid_np_count;
     logic                  last_pass;
 
-    //Clock generation — 100 MHz
+    // Clock generation — 100 MHz
     always #5 clk = ~clk;
 
-    //DUT instantiation
+    // DUT instantiation
     bnn_seq_addr_gen #(
         .P_W         (P_W),
         .P_N         (P_N),
@@ -143,7 +143,7 @@ module tb_bnn_seq_addr_gen;
     end
 
     //Concurrent output checker
-    //    //Runs every active posedge and compares each DUT registered output with
+    //Runs every active posedge and compares each DUT registered output with
     //the shadow model.  Reports via $error (visible in sim log and counted by
     //the master script) and also increments the shadow fail counter.
     int shadow_fail_cnt = 0;
@@ -169,17 +169,16 @@ module tb_bnn_seq_addr_gen;
         end
     end
 
-    //SVA — Protocol contracts
-
-    //iter_clr is a NEXT-VALUE OVERRIDE, not an unconditional clear.
-    //The FSM must NEVER assert iter_clr without also asserting iter_we.
-    //Any violation is an FSM protocol bug. [H1], STATE.md §4.2.
+    // SVA — Protocol contracts
+    // iter_clr is a NEXT-VALUE OVERRIDE, not an unconditional clear.
+    // The FSM must NEVER assert iter_clr without also asserting iter_we.
+    // Any violation is an FSM protocol bug. [H1], STATE.md §4.2.
     property p_iter_clr_req_we;
         @(posedge clk) disable iff (rst)
         iter_clr |-> iter_we;
     endproperty
     assert property (p_iter_clr_req_we)
-    else $error("[assertion] iter_clr=1 but iter_we=0");
+    else $error("[SVA] iter_clr=1 but iter_we=0");
 
     //symmetric rule for pass_clr. [H1], STATE.md §4.2.
     property p_pass_clr_req_we;
@@ -187,7 +186,7 @@ module tb_bnn_seq_addr_gen;
         pass_clr |-> pass_we;
     endproperty
     assert property (p_pass_clr_req_we)
-    else $error("[assertion] pass_clr=1 but pass_we=0");
+    else $error("[SVA] pass_clr=1 but pass_we=0");
 
     //When iter_clr fires WITHOUT iter_we, the counter must not change.
     //This is an RTL-regression guard: if someone re-wires iter_clr as
@@ -197,7 +196,7 @@ module tb_bnn_seq_addr_gen;
         (iter_clr && !iter_we) |=> $stable(DUT.iter_cnt_r_q);
     endproperty
     assert property (p_iter_no_change_clr_alone)
-    else $error("[assertion] FAIL: iter_cnt changed on iter_clr without iter_we");
+    else $error("[SVA] FAIL: iter_cnt changed on iter_clr without iter_we");
 
     //Weight address formula.
     //One cycle after wt_addr_we, wt_rd_addr must equal the pass counter value
@@ -216,7 +215,7 @@ module tb_bnn_seq_addr_gen;
                                 : $past(DUT.iter_cnt_r_q))));
     endproperty
     assert property (p_wt_addr_formula)
-    else $error("[assertion] wt_rd_addr=%0d expected=%0d",
+    else $error("[SVA] FAIL a_wt_addr_formula: wt_rd_addr=%0d expected=%0d",
                 wt_rd_addr,
                 WT_ADDR_W'($past(DUT.pass_cnt_r_q))*WT_ADDR_W'(ITERS)
                 + WT_ADDR_W'(($past(iter_we)
@@ -232,7 +231,7 @@ module tb_bnn_seq_addr_gen;
         thr_addr_we |=> (thr_rd_addr == THR_ADDR_W'($past(DUT.pass_cnt_r_q)));
     endproperty
     assert property (p_thr_addr_formula)
-    else $error("[assertion] FAIL: thr_rd_addr=%0d expected=%0d",
+    else $error("[SVA] FAIL: thr_rd_addr=%0d expected=%0d",
                 thr_rd_addr, THR_ADDR_W'($past(DUT.pass_cnt_r_q)));
 
     //last_pass and valid_np_count consistency.
@@ -243,7 +242,7 @@ module tb_bnn_seq_addr_gen;
         last_pass |-> (valid_np_count == NP_CNT_W'(LAST_PASS_COUNT));
     endproperty
     assert property (p_last_pass_vnp_consistent)
-    else $error("[assertion] FAIL: last_pass=1 but valid_np_count=%0d != LAST_PASS_COUNT=%0d",
+    else $error("[SVA] FAIL: last_pass=1 but valid_np_count=%0d != LAST_PASS_COUNT=%0d",
                 valid_np_count, LAST_PASS_COUNT);
 
     //Covergroups
@@ -304,7 +303,7 @@ module tb_bnn_seq_addr_gen;
 
     //Reset task
     task automatic reset_dut(int cycles = 10);
-        //Deassert every strobe first so DUT starts clean.
+        // Deassert every strobe first so DUT starts clean.
         rst <= 1'b1;
         iter_we <= 1'b0;  iter_clr <= 1'b0;
         pass_we <= 1'b0;  pass_clr <= 1'b0;
@@ -315,14 +314,14 @@ module tb_bnn_seq_addr_gen;
     endtask
 
     //Canonical strobe driver — mimics bnn_layer_ctrl FSM output
-    //    //For each pass p=0..PASSES-1:
+    //  For each pass p=0..PASSES-1:
     //  1. thr_addr_we (1 cycle)
     //  2. For each iter i=0..ITERS-1:
     //       wt_addr_we + iter_we in same cycle
     //       iter_clr=1 only at last iteration of pass
     //  3. vnp_we + pass_we in same cycle (STATE.md §4.3)
     //       pass_clr=1 at last pass
-    //    //After this task, both counters are back at 0 (pass_clr + iter_clr
+    //   After this task, both counters are back at 0 (pass_clr + iter_clr
     //on the final iteration/pass resets them).
     task automatic drive_canonical_run();
         for (int p = 0; p < PASSES; p++) begin
@@ -361,9 +360,9 @@ module tb_bnn_seq_addr_gen;
         repeat (5) @(posedge clk);
     endtask
 
-    //�� Post-reset output values
+    // Post-reset output values
     task automatic test_t01_reset_values();
-        $display("[test] Post-reset output values");
+        $display("[TEST] T01: Post-reset output values");
         reset_dut(10);
         @(posedge clk);
         check("T01_wt_zero",    wt_rd_addr    == '0,
@@ -374,15 +373,17 @@ module tb_bnn_seq_addr_gen;
               $sformatf("valid_np_count=%0d expected=%0d", valid_np_count, P_N));
         check("T01_lp_zero",    last_pass == 1'b0,
               $sformatf("last_pass=%0b", last_pass));
-        //iter_tc is combinational; at iter_cnt=0 it is 1 only if ITERS==1
+        // iter_tc is combinational; at iter_cnt=0 it is 1 only if ITERS==1
         check("T01_iter_tc",    iter_tc == (ITERS == 1 ? 1'b1 : 1'b0),
               $sformatf("iter_tc=%0b ITERS=%0d", iter_tc, ITERS));
     endtask
 
-    //�� Drive iter_we until iter_tc fires; verify exact boundary
+    //
+    // T02 — Drive iter_we until iter_tc fires; verify exact boundary
+    //
     task automatic test_t02_iter_tc();
         logic saw_tc;
-        $display("[test] iter_tc fires exactly at ITERS-1 = %0d", ITERS-1);
+        $display("[TEST] T02: iter_tc fires exactly at ITERS-1 = %0d", ITERS-1);
         reset_dut();
         saw_tc = 1'b0;
 
@@ -412,15 +413,17 @@ module tb_bnn_seq_addr_gen;
         check("T02_iter_tc_seen", saw_tc == 1'b1, "iter_tc never asserted");
     endtask
 
-    //�� Full canonical run: address formula and pass_tc verified end-to-end
+    //
+    // T03 — Full canonical run: address formula and pass_tc verified end-to-end
+    //
     task automatic test_t03_full_run();
         logic saw_pass_tc;
         int   timeout_cnt;
-        $display("[test] Full canonical run — wt_rd_addr and pass_tc");
+        $display("[TEST] T03: Full canonical run — wt_rd_addr and pass_tc");
         reset_dut();
         saw_pass_tc = 1'b0;
 
-        //Fork: run the driver and in parallel watch for pass_tc.
+        // Fork: run the driver and in parallel watch for pass_tc.
         fork
             drive_canonical_run();
             begin : watch_pass_tc
@@ -439,28 +442,29 @@ module tb_bnn_seq_addr_gen;
         check("T03_pass_tc_seen", saw_pass_tc,
               "pass_tc never asserted during full run");
 
-        //After the run both counters must have wrapped back to 0 via *_clr.
+        // After the run both counters must have wrapped back to 0 via *_clr.
         @(posedge clk);
         check("T03_iter_cnt_zero", DUT.iter_cnt_r_q == '0,
               $sformatf("iter_cnt=%0d after run", DUT.iter_cnt_r_q));
         check("T03_pass_cnt_zero", DUT.pass_cnt_r_q == '0,
               $sformatf("pass_cnt=%0d after run", DUT.pass_cnt_r_q));
-        //The shadow checker verifies the address formula on every cycle.
-        //shadow_fail_cnt will be non-zero if any mismatch occurred.
+        // The shadow checker verifies the address formula on every cycle.
+        // shadow_fail_cnt will be non-zero if any mismatch occurred.
         check("T03_shadow_clean", shadow_fail_cnt == 0,
               $sformatf("shadow mismatch count=%0d", shadow_fail_cnt));
     endtask
 
-    //�� iter_clr AND iter_we: counter must load 0
+    
+    // T05 — iter_clr AND iter_we: counter must load 0
     task automatic test_t05_clr_with_we();
-        $display("[test] iter_clr AND iter_we — counter loads 0");
+        $display("[TEST] T05: iter_clr AND iter_we — counter loads 0");
         reset_dut();
-        //Advance to non-zero state
+        // Advance to non-zero state
         repeat (3) begin
             @(posedge clk); iter_we <= 1'b1;
             @(posedge clk); iter_we <= 1'b0;
         end
-        //Now assert both signals in the same cycle
+        // Now assert both signals in the same cycle
         @(posedge clk);
         iter_we  <= 1'b1;
         iter_clr <= 1'b1;
@@ -472,11 +476,11 @@ module tb_bnn_seq_addr_gen;
               $sformatf("iter_cnt=%0d expected 0", DUT.iter_cnt_r_q));
     endtask
 
-    //�� vnp_we at every pass boundary: valid_np_count and last_pass correct
-    //    //Drives the full PASSES sequence one pass at a time and checks
-    //valid_np_count / last_pass after each vnp_we strobe.
+    // T06 — vnp_we at every pass boundary: valid_np_count and last_pass correct
+    // Drives the full PASSES sequence one pass at a time and checks
+    // valid_np_count / last_pass after each vnp_we strobe.
     task automatic test_t06_vnp_sequence();
-        $display("[test] vnp_we at pass boundaries — VNP=%0d LPC=%0d PASSES=%0d",
+        $display("[TEST] T06: vnp_we at pass boundaries — VNP=%0d LPC=%0d PASSES=%0d",
                  P_N, LAST_PASS_COUNT, PASSES);
         reset_dut();
 
@@ -521,7 +525,7 @@ module tb_bnn_seq_addr_gen;
         end
     endtask
 
-    //�� LAST_PASS_COUNT == P_N when NUM_NEURONS % P_N == 0
+    // LAST_PASS_COUNT == P_N when NUM_NEURONS % P_N == 0
     //(geometry-conditional: skip if REMAINDER != 0)
     task automatic test_t07_full_pass_no_remainder();
         $display("[test] LAST_PASS_COUNT==P_N when remainder==0");
@@ -533,15 +537,15 @@ module tb_bnn_seq_addr_gen;
         check("T07_lpc_eq_pn",
               LAST_PASS_COUNT == P_N,
               $sformatf("LAST_PASS_COUNT=%0d P_N=%0d", LAST_PASS_COUNT, P_N));
-        //Run a full cycle and verify the shadow stays consistent (shadow_fail_cnt).
+        // Run a full cycle and verify the shadow stays consistent (shadow_fail_cnt).
         reset_dut();
         drive_canonical_run();
         check("T07_shadow_clean", shadow_fail_cnt == 0,
               $sformatf("shadow mismatches=%0d", shadow_fail_cnt));
     endtask
 
-    //�� Degenerate single-pass geometry: last_pass must assert on first vnp_we
-    //(geometry-conditional: skip if PASSES != 1)
+    // T08 — Degenerate single-pass geometry: last_pass must assert on first vnp_we
+    // (geometry-conditional: skip if PASSES != 1)
     task automatic test_t08_single_pass();
         $display("[test] Single-pass geometry (PASSES=%0d)", PASSES);
         if (PASSES != 1) begin
@@ -574,9 +578,9 @@ module tb_bnn_seq_addr_gen;
               $sformatf("vnp=%0d expected=%0d", valid_np_count, LAST_PASS_COUNT));
     endtask
 
-    //�� Reset mid-counting: all state returns to reset values
+    // T09 — Reset mid-counting: all state returns to reset values
     task automatic test_t09_reset_mid_run();
-        $display("[test] Reset mid-counting");
+        $display("[TEST] T09: Reset mid-counting");
         reset_dut();
 
         //Advance counters to non-zero state
@@ -604,10 +608,11 @@ module tb_bnn_seq_addr_gen;
         check("T09_lp_zero",    last_pass == 1'b0,      "last_pass not 0");
     endtask
 
-    //�� Random strobe stress (constrained: no clr without we)
-    //    //Fires random strobe combinations for 10000 cycles.  The shadow model
-    //and SVAs continuously verify correctness.  Pass criterion: zero shadow
-    //mismatches and zero SVA violations.
+    // T10 — Random strobe stress (constrained: no clr without we)
+    // Fires random strobe combinations for 10000 cycles.  The shadow model
+    // and SVAs continuously verify correctness.  Pass criterion: zero shadow
+    // mismatches and zero SVA violations.
+
     task automatic test_t10_random_stress();
         int n = `SAG_TB_RANDOM_CYCLES;
         logic next_iter_we;

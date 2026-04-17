@@ -18,14 +18,14 @@ module bnn_byte_filter #(
     input  logic                    m_ready
 );
 
-    //  Internal wires 
+    
     logic accept_word;
     logic idx_we;
     logic idx_clr;
     logic in_serialize;
     logic at_end;
 
-    //  FSM 
+    
     bnn_byte_filter_fsm u_fsm (
         .clk         (clk),
         .rst         (rst),
@@ -40,7 +40,7 @@ module bnn_byte_filter #(
         .in_serialize(in_serialize)
     );
 
-    //  Datapath 
+    
     bnn_byte_filter_dp #(
         .BUS_WIDTH (BUS_WIDTH)
     ) u_dp (

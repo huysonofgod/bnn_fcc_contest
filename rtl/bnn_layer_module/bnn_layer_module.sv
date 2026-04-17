@@ -15,33 +15,39 @@ module bnn_layer_module #(
     input  logic                          clk,
     input  logic                          rst,
 
-    // Per-image control ----------------------------------------------    input  logic                          start,
+    // ---- Per-image control --------------------------------------------------
+    input  logic                          start,
     output logic                          busy,
     output logic                          done,
 
-    // Compute stream in (binary words from prev layer or binarizer) --    input  logic                          s_valid,
+    // ---- Compute stream in (binary words from prev layer or binarizer) ------
+    input  logic                          s_valid,
     output logic                          s_ready,
     input  logic [P_W-1:0]                s_data,
     input  logic                          s_last,
 
-    // Hidden-layer downstream (packed binary, IS_OUTPUT_LAYER==0) ----    output logic                          m_valid,
+    // ---- Hidden-layer downstream (packed binary, IS_OUTPUT_LAYER==0) --------
+    output logic                          m_valid,
     input  logic                          m_ready,
     output logic [NEXT_P_W-1:0]           m_data,
     output logic                          m_last,
 
-    // Output-layer downstream (raw scores, IS_OUTPUT_LAYER==1) -------    output logic                          score_valid,
+    // ---- Output-layer downstream (raw scores, IS_OUTPUT_LAYER==1) -----------
+    output logic                          score_valid,
     input  logic                          score_ready,
     output logic [NUM_NEURONS*ACC_W-1:0]  score_data,
     output logic                          score_last,
 
-    // Configuration write port (weight RAMs) -------------------------    input  logic                          cfg_wr_valid,
+    // ---- Configuration write port (weight RAMs) -----------------------------
+    input  logic                          cfg_wr_valid,
     output logic                          cfg_wr_ready,
     input  logic [LID_W-1:0]              cfg_wr_layer,
     input  logic [15:0]                   cfg_wr_np,
     input  logic [15:0]                   cfg_wr_addr,
     input  logic [P_W-1:0]                cfg_wr_data,
 
-    // Configuration write port (threshold RAMs) ----------------------    input  logic                          cfg_thr_valid,
+    // ---- Configuration write port (threshold RAMs) --------------------------
+    input  logic                          cfg_thr_valid,
     output logic                          cfg_thr_ready,
     input  logic [LID_W-1:0]              cfg_thr_layer,
     input  logic [15:0]                   cfg_thr_np,
@@ -49,7 +55,9 @@ module bnn_layer_module #(
     input  logic [31:0]                   cfg_thr_data
 );
 
+    // =========================================================================
     // Localparams — must match M3 bnn_layer_ctrl formulas exactly
+    // =========================================================================
     localparam int ITERS      = (FAN_IN + P_W - 1) / P_W;
     localparam int PASSES     = (NUM_NEURONS + P_N - 1) / P_N;
     localparam int WT_DEPTH   = ITERS * PASSES;
@@ -69,7 +77,9 @@ module bnn_layer_module #(
     assign cfg_wr_ready  = 1'b1;
     assign cfg_thr_ready = 1'b1;
 
+    // =========================================================================
     // M2 — Input buffer (elastic FIFO between upstream and M3)
+    // =========================================================================
     logic            buf_valid;
     logic            buf_ready;
     logic [P_W-1:0]  buf_data;
@@ -92,7 +102,9 @@ module bnn_layer_module #(
         .count   ()              // unused
     );
 
+    // =========================================================================
     // L4 — Fan-out buffer for NP x_in broadcast
+    // =========================================================================
     logic [P_W-1:0] x_bcast;
 
     bnn_fanout_buf #(
@@ -105,7 +117,9 @@ module bnn_layer_module #(
         .q   (x_bcast)
     );
 
+    // =========================================================================
     // M3 — Layer controller FSM
+    // =========================================================================
     logic                    np_valid_in;
     logic                    np_last;
     logic [WT_ADDR_W-1:0]   wt_rd_addr;
@@ -185,7 +199,9 @@ module bnn_layer_module #(
     assign busy = layer_busy;
     assign done = layer_done;
 
+    // =========================================================================
     // Per-NP write-enable decode
+    // =========================================================================
     logic                layer_match_wr;
     logic                layer_match_thr;
     logic [P_N-1:0]      wt_we;
@@ -202,7 +218,9 @@ module bnn_layer_module #(
         end
     endgenerate
 
+    // =========================================================================
     // Per-NP: Weight RAMs + Threshold RAMs + Neuron Processors
+    // =========================================================================
     logic [P_W-1:0]    wt_rd_data   [P_N];
     logic [ACC_W-1:0]  thr_rd_data  [P_N];
 
@@ -217,7 +235,8 @@ module bnn_layer_module #(
     generate
         for (gj = 0; gj < P_N; gj++) begin : g_np_bank
 
-            // Weight RAM (always present) ----------------------------            bnn_dp_ram #(
+            // ---- Weight RAM (always present) --------------------------------
+            bnn_dp_ram #(
                 .WIDTH      (P_W),
                 .DEPTH      (WT_DEPTH),
                 .OUTPUT_REG (0),
@@ -233,7 +252,8 @@ module bnn_layer_module #(
                 .rd_data (wt_rd_data[gj])
             );
 
-            // Threshold RAM (hidden layers only) ---------------------            if (IS_OUTPUT_LAYER == 1'b0) begin : g_thr_ram
+            // ---- Threshold RAM (hidden layers only) -------------------------
+            if (IS_OUTPUT_LAYER == 1'b0) begin : g_thr_ram
                 bnn_dp_ram #(
                     .WIDTH      (ACC_W),
                     .DEPTH      (THR_DEPTH),
@@ -254,7 +274,8 @@ module bnn_layer_module #(
                 assign thr_rd_data[gj] = '0;
             end
 
-            // Neuron Processor ---------------------------------------            // Debug outputs connected to local wires (not part of public contract)
+            // ---- Neuron Processor -------------------------------------------
+            // Debug outputs connected to local wires (not part of public contract)
             logic [P_W-1:0]                   dbg_xnor_bits;
             logic [$clog2(P_W+1)-1:0]         dbg_beat_popcount;
             logic [ACC_W-1:0]                  dbg_accum;
@@ -289,10 +310,13 @@ module bnn_layer_module #(
         end
     endgenerate
 
+    // =========================================================================
     // M4 (hidden) or M5 (output) — compile-time selection via generate
+    // =========================================================================
     generate
         if (IS_OUTPUT_LAYER == 1'b0) begin : g_hidden
-            // M4 Activation Packer (hidden layers) -------------------            bnn_activation_packer #(
+            // ---- M4 Activation Packer (hidden layers) -----------------------
+            bnn_activation_packer #(
                 .IN_BITS  (P_N),
                 .OUT_BITS (NEXT_P_W)
             ) u_packer (
@@ -315,7 +339,7 @@ module bnn_layer_module #(
             assign score_last  = 1'b0;
 
         end else begin : g_output
-            // M5 score collector for output layer
+            // ---- M5 Score Collector (output layer) --------------------------
             bnn_score_collector #(
                 .P_N         (P_N),
                 .NUM_NEURONS (NUM_NEURONS),
@@ -341,7 +365,9 @@ module bnn_layer_module #(
         end
     endgenerate
 
+    // =========================================================================
     // Assertions
+    // =========================================================================
 
     // A1. cfg_wr_np must be in range when writing to this layer
     property p_cfg_wr_np_in_range;
@@ -378,7 +404,9 @@ module bnn_layer_module #(
         end
     endgenerate
 
+    // =========================================================================
     // Compile-time sanity checks
+    // =========================================================================
     initial begin
         assert (P_N >= 1)  else $fatal(1, "bnn_layer_module: P_N must be >= 1");
         assert (P_W >= 1)  else $fatal(1, "bnn_layer_module: P_W must be >= 1");

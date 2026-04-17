@@ -18,7 +18,7 @@ module neuron_processor #(
     output logic                 valid_out,
 
 
-    // Debug signals for bring-up; remove after verification
+    //DEBUG SIGNALS ---REMIND: delete once verified correct---
     output logic [P_W-1:0]       dbg_xnor_bits,
     output logic [$clog2(P_W + 1)-1:0] dbg_beat_popcount,
     output logic [ACC_W-1:0]     dbg_accum,

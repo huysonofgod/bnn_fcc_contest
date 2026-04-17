@@ -18,7 +18,9 @@
 
 module bnn_layer_ctrl_tb;
 
+    //
     // Parameters (moderate size for fast simulation)
+    //
     parameter int P_W             = `BNN_LAYER_CTRL_TB_P_W;
     parameter int P_N             = `BNN_LAYER_CTRL_TB_P_N;
     parameter int NUM_NEURONS     = `BNN_LAYER_CTRL_TB_NUM_NEURONS;
@@ -33,7 +35,9 @@ module bnn_layer_ctrl_tb;
     localparam int REMAINDER  = NUM_NEURONS % P_N;
     localparam int LAST_PASS_COUNT = (REMAINDER == 0) ? P_N : REMAINDER;
 
+    //
     // DUT Interface Signals
+    //
     logic                  clk = 0;
     logic                  rst = 1;
     logic                  start;
@@ -48,12 +52,16 @@ module bnn_layer_ctrl_tb;
     logic [NP_CNT_W-1:0]   valid_np_count;
     logic                  last_pass;
 
+    //
     // Clock Generation (100 MHz)
+    //
     always #5 clk = ~clk;
 
+    //
     // DUT Instantiation — bnn_layer_ctrl is now pure FSM. Pair with
     // bnn_seq_addr_gen (u_seq) here so the TB can observe the old-style
     // address/count/last_pass outputs without changing test scenarios.
+    //
     // Strobes + status between FSM and sequencer
     logic iter_we, iter_clr;
     logic pass_we, pass_clr;
@@ -115,73 +123,91 @@ module bnn_layer_ctrl_tb;
         .last_pass      (last_pass)
     );
 
+    //
     // SVA Properties (Gray Box)
+    //
 
-    // Check: done is exactly 1 clock cycle pulse
+    //
+    // SVA-1: done is exactly 1 clock cycle pulse
     // RATIONALE: Downstream state machines count done pulses per image.
     // The done output comes from DONE_ST state which lasts exactly 1 cycle.
+    //
     property p_done_single_cycle;
         @(posedge clk) disable iff (rst)
         done |=> !done;
     endproperty
     assert property (p_done_single_cycle)
-    else $error("Assertion failed: done pulse lasted more than 1 cycle");
+    else $error("[SVA] FAIL: done pulse lasted more than 1 cycle");
 
-    // Check: np_last is exactly 1 cycle pulse (LAST_BEAT state)
+    //
+    // SVA-2: np_last is exactly 1 cycle pulse (LAST_BEAT state)
     // RATIONALE: NPs use np_last to trigger final accumulation. Multiple
     // cycles of np_last would corrupt popcount accumulation.
+    //
     property p_np_last_single_cycle;
         @(posedge clk) disable iff (rst)
         np_last |=> !np_last;
     endproperty
     assert property (p_np_last_single_cycle)
-    else $error("Assertion failed: np_last pulse lasted more than 1 cycle");
+    else $error("[SVA] FAIL: np_last pulse lasted more than 1 cycle");
 
-    // Check: result_valid held until result_ready handshake
+    //
+    // SVA-3: result_valid held until result_ready handshake
     // RATIONALE: AXI-Stream compliance. Once result_valid is asserted in
     // FLUSH_OUT state, it must remain high until result_ready is received.
+    //
     property p_result_valid_axi_hold;
         @(posedge clk) disable iff (rst)
         ((DUT.u_fsm.state_r == DUT.u_fsm.FLUSH_OUT) &&
          result_valid && !result_ready) |=> result_valid;
     endproperty
     assert property (p_result_valid_axi_hold)
-    else $error("Assertion failed: result_valid dropped without result_ready");
+    else $error("[SVA] FAIL: result_valid dropped without result_ready");
 
-    // Check: No s_ready without start first -- controller must be activated
+    //
+    // SVA-4: No s_ready without start first -- controller must be activated
     // before consuming input.
     // RATIONALE: s_ready should only assert in RUN_ITER state, which requires
     // start to have been pulsed first.
+    //
     property p_no_ready_before_start;
         @(posedge clk) disable iff (rst)
         (!busy && !$past(start)) |-> !s_ready;
     endproperty
     assert property (p_no_ready_before_start)
-    else $error("Assertion failed: s_ready asserted without prior start");
+    else $error("[SVA] FAIL: s_ready asserted without prior start");
 
-    // Check: thr_rd_en does not re-assert until next result_valid handshake
+    //
+    // SVA-5: thr_rd_en does not re-assert until next result_valid handshake
     // RATIONALE: Threshold read happens once per pass (in LOAD_THR state).
+    //
     property p_thr_rd_en_once_per_pass;
         @(posedge clk) disable iff (rst)
         thr_rd_en |=> !thr_rd_en until_with result_valid;
     endproperty
     assert property (p_thr_rd_en_once_per_pass)
-    else $error("Assertion failed: thr_rd_en fired twice before result_valid");
+    else $error("[SVA] FAIL: thr_rd_en fired twice before result_valid");
 
-    // Check: busy spans from start until done -- busy must remain high for
+    //
+    // SVA-6: busy spans from start until done -- busy must remain high for
     // the entire processing duration.
     // RATIONALE: busy indicates processing in progress; downstream relies on it.
+    //
     property p_busy_spans_operation;
         @(posedge clk) disable iff (rst)
         $rose(busy) |-> ##[1:$] done [->1] ##1 !busy;
     endproperty
     assert property (p_busy_spans_operation)
-    else $error("Assertion failed: busy did not span from start to done");
+    else $error("[SVA] FAIL: busy did not span from start to done");
 
+    //
     // Covergroups (Gray Box)
+    //
 
+    //
     // COVERGROUP: FSM state coverage and state transitions
     // Tracks all 6 FSM states and the 8 valid transition arcs.
+    //
     covergroup cg_fsm_states @(posedge clk iff (!rst));
         cp_state: coverpoint DUT.u_fsm.state_r {
             bins idle      = {DUT.u_fsm.IDLE};
@@ -193,8 +219,10 @@ module bnn_layer_ctrl_tb;
         }
     endgroup
 
+    //
     // COVERGROUP: Iteration/pass counter coverage and valid_np_count
     // Ensures counters reach all extremes (first, mid, last).
+    //
     covergroup cg_counters @(posedge clk iff (!rst));
         cp_iter_cnt: coverpoint u_seq.iter_cnt_r_q {
             bins zero  = {0};
@@ -212,9 +240,11 @@ module bnn_layer_ctrl_tb;
         }
     endgroup
 
+    //
     // COVERGROUP: Backpressure scenarios
     // Covers stall events on input (s_ready but no s_valid) and output
     // (result_valid but no result_ready).
+    //
     covergroup cg_backpressure @(posedge clk iff (!rst));
         cp_input_stall: coverpoint {s_ready, s_valid} {
             bins stall  = {2'b10};
@@ -231,7 +261,9 @@ module bnn_layer_ctrl_tb;
     cg_counters     cg_cnt  = new();
     cg_backpressure cg_bp   = new();
 
+    //
     // Scoreboard
+    //
     int pass_count = 0;
     int fail_count = 0;
     string fail_log[$];
@@ -242,11 +274,13 @@ module bnn_layer_ctrl_tb;
         end else begin
             fail_count++;
             fail_log.push_back($sformatf("[FAIL] %s: %s", test_name, msg));
-            $error("Scoreboard mismatch: %s: %s", test_name, msg);
+            $error("[SB] %s: %s", test_name, msg);
         end
     endfunction
 
+    //
     // Counters for pass-level verification
+    //
     int np_valid_count;         // count np_valid_in assertions per pass
     int result_valid_count;     // count result_valid handshakes per image
     int thr_rd_en_count;        // count thr_rd_en per image
@@ -268,7 +302,9 @@ module bnn_layer_ctrl_tb;
         end
     end
 
+    //
     // Reset Task
+    //
     task automatic reset_dut();
         rst          <= 1'b1;
         start        <= 1'b0;
@@ -280,7 +316,9 @@ module bnn_layer_ctrl_tb;
         repeat (5) @(posedge clk);
     endtask
 
+    //
     // Helper: Run one complete image through the controller
+    //
     task automatic run_one_image(
         input real valid_probability,   // 0.0 to 1.0: probability s_valid=1
         input real ready_probability,   // 0.0 to 1.0: probability result_ready=1
@@ -320,11 +358,13 @@ module bnn_layer_ctrl_tb;
               "Controller timed out");
     endtask
 
+    //
     // Test Scenarios
+    //
 
-    // Single image with no backpressure
+    //--- Test 1: Single image, no backpressure --------------------------------
     task automatic test_single_no_bp();
-        $display("Running: test_single_no_bp: clean start-to-done flow");
+        $display("[TEST] test_single_no_bp: clean start-to-done flow");
         run_one_image(1.0, 1.0, "single_no_bp");
 
         // done is a one-cycle pulse; allow one cycle for deassertion.
@@ -333,31 +373,31 @@ module bnn_layer_ctrl_tb;
               "done should have deasserted by now");
     endtask
 
-    // Input-stall stress with VALID_PROBABILITY=0.8
+    //--- Test 2: Input stall stress (VALID_PROBABILITY=0.8) -------------------
     task automatic test_input_stall();
-        $display("Running: test_input_stall: random s_valid gaps (80%%)");
+        $display("[TEST] test_input_stall: random s_valid gaps (80%%)");
         run_one_image(0.8, 1.0, "input_stall");
     endtask
 
-    // Output-stall stress
+    //--- Test 3: Output stall stress ------------------------------------------
     task automatic test_output_stall();
-        $display("Running: test_output_stall: random result_ready=0");
+        $display("[TEST] test_output_stall: random result_ready=0");
         run_one_image(1.0, 0.5, "output_stall");
     endtask
 
-    // Multi-image sequence (10 images)
+    //--- Test 4: Multi-image sequence (10 images) -----------------------------
     task automatic test_multi_image();
-        $display("Running: test_multi_image: 10 consecutive images");
+        $display("[TEST] test_multi_image: 10 consecutive images");
         for (int img = 0; img < 10; img++) begin
             run_one_image(0.9, 0.9, $sformatf("multi_img_%0d", img));
             repeat (5) @(posedge clk);
         end
     endtask
 
-    // Reset in the middle of processing
+    //--- Test 5: Reset mid-operation ------------------------------------------
     task automatic test_reset_mid_run();
         int timeout_cnt;
-        $display("Running: test_reset_mid_run: assert rst in various states");
+        $display("[TEST] test_reset_mid_run: assert rst in various states");
 
         // Start operation
         @(posedge clk);
@@ -393,13 +433,13 @@ module bnn_layer_ctrl_tb;
         run_one_image(1.0, 1.0, "reset_mid_recovery");
     endtask
 
-    // Verify iteration count per pass
+    //--- Test 6: Verify iteration count per pass ------------------------------
     task automatic test_iteration_count();
         int np_valid_cnt_per_pass;
         int timeout_cnt;
         logic [NP_CNT_W-1:0] vnp_seen;
         logic                last_pass_seen;
-        $display("Running: test_iteration_count: verify ITERS=%0d per pass", ITERS);
+        $display("[TEST] test_iteration_count: verify ITERS=%0d per pass", ITERS);
 
         @(posedge clk);
         start <= 1'b1;
@@ -470,20 +510,20 @@ module bnn_layer_ctrl_tb;
         @(posedge clk);
     endtask
 
-    // Combined stress under contest-like conditions
+    //--- Test 7: Combined stress (contest conditions) -------------------------
     task automatic test_contest_stress();
-        $display("Running: test_contest_stress: VALID_PROB=0.8, TOGGLE_READY=1");
+        $display("[TEST] test_contest_stress: VALID_PROB=0.8, TOGGLE_READY=1");
         for (int img = 0; img < 5; img++) begin
             run_one_image(0.8, 0.7, $sformatf("contest_stress_%0d", img));
             repeat (2) @(posedge clk);
         end
     endtask
 
-    // Weight-address verification
+    //--- Test 8: Weight address verification ----------------------------------
     task automatic test_weight_address();
         int expected_addr;
         int timeout_cnt;
-        $display("Running: test_weight_address: verify wt_rd_addr sequence");
+        $display("[TEST] test_weight_address: verify wt_rd_addr sequence");
 
         @(posedge clk);
         start <= 1'b1;
@@ -525,7 +565,9 @@ module bnn_layer_ctrl_tb;
         @(posedge clk);
     endtask
 
+    //
     // Main Test Sequence
+    //
     initial begin
         $display("============================================================");
         $display("  bnn_layer_ctrl Testbench (UVM-style CRV+, Gray-Box)");
@@ -561,7 +603,9 @@ module bnn_layer_ctrl_tb;
 
         repeat (20) @(posedge clk);
 
+        //
         // Scoreboard Summary
+        //
         $display("");
         $display("============================================================");
         $display("  SCOREBOARD SUMMARY -- bnn_layer_ctrl");

@@ -24,41 +24,11 @@ package bnn_cfg_mgr_pkg;
         EOS_AFTER_TRAILER= 1'b1
     } dbg_eos_strategy_t;
 
-    function automatic int layer_pw_fn(
-        input int p_in,
-        input int p_n_arr[],
-        input int idx
-    );
-        if (idx == 0)
-            return p_in;
-        if ((idx > 0) && (idx <= p_n_arr.size() - 1))
-            return p_n_arr[idx - 1];
-        return 1;
-    endfunction
-
-    function automatic int layer_pn_fn(
-        input int p_n_arr[],
-        input int idx
-    );
-        if ((idx >= 0) && (idx < p_n_arr.size()))
-            return p_n_arr[idx];
-        return 1;
-    endfunction
-
-    function automatic int max_pw_fn(
-        input int p_in,
-        input int p_n_arr[]
-    );
-        int m;
-        m = p_in;
-        foreach (p_n_arr[i]) begin
-            if (i < (p_n_arr.size() - 1)) begin
-                if (p_n_arr[i] > m)
-                    m = p_n_arr[i];
-            end
-        end
-        return m;
-    endfunction
+    // Layer width/neuron-count helpers removed from the package because Vivado
+    // does not synthesize functions with dynamic-range (open) array arguments
+    // (ERROR [Synth 8-27] "dynamic range not supported"). Inlined directly at
+    // the caller in bnn_config_manager.sv where PARALLEL_NEURONS is a
+    // fixed-size module parameter.
 
     function automatic logic [15:0] sat_inc16(input logic [15:0] val);
         if (val == 16'hFFFF)

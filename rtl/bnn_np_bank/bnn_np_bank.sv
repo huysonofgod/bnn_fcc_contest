@@ -9,21 +9,29 @@ module bnn_np_bank #(
 )(
     input  logic                          clk,
     input  logic                          rst,
+
+    
     input  logic [P_W-1:0]                x_in,
 
+    //  Per-NP weight words (same cycle as x_in; read from per-NP RAMs) ─
     input  logic [P_N*P_W-1:0]            w_flat,
 
+    //  Per-NP thresholds (ACC_W each; hidden layers only, ignored in
+    //     output mode via mode_output_layer_sel) 
     input  logic [P_N*ACC_W-1:0]          thr_flat,
 
+    
     input  logic                          np_valid_in,
     input  logic                          np_last,
     input  logic                          mode_output_layer_sel,
 
+    
     output logic [P_N-1:0]                y_out,
     output logic [P_N*ACC_W-1:0]          score_out,
     output logic                          np_valid_out
 );
 
+    
     // x_in, w_flat, valid, last, and mode must remain cycle-aligned when
     // FANOUT_STAGES inserts timing-relief latency. Thresholds are pass/image
     // constant and stay at the module boundary.
@@ -83,7 +91,7 @@ module bnn_np_bank #(
         .q   (mode_output_layer_sel_aligned)
     );
 
-    // Per-NP compute lanes
+    
     logic              np_valid_lane [P_N];
 
     genvar gj;
@@ -136,7 +144,7 @@ module bnn_np_bank #(
     // All lanes see identical control — lane 0's valid_out represents the bank.
     assign np_valid_out = np_valid_lane[0];
 
-    // Compile-time sanity checks
+    
     initial begin
         assert (P_W  >= 1) else $fatal(1, "bnn_np_bank: P_W must be >= 1");
         assert (P_N  >= 1) else $fatal(1, "bnn_np_bank: P_N must be >= 1");

@@ -46,16 +46,22 @@ module bnn_config_manager #(
 
     import bnn_cfg_mgr_pkg::*;
 
-    // Elaboration helpers 
+    
     function automatic int layer_pw_local(input int idx);
-        return bnn_cfg_mgr_pkg::layer_pw_fn(PARALLEL_INPUTS, PARALLEL_NEURONS, idx);
+        if (idx == 0)
+            return PARALLEL_INPUTS;
+        if ((idx > 0) && (idx <= NLY - 1))
+            return PARALLEL_NEURONS[idx - 1];
+        return 1;
     endfunction
 
     function automatic int layer_pn_local(input int idx);
-        return bnn_cfg_mgr_pkg::layer_pn_fn(PARALLEL_NEURONS, idx);
+        if ((idx >= 0) && (idx < NLY))
+            return PARALLEL_NEURONS[idx];
+        return 1;
     endfunction
 
-    // M7 byte-filter boundary
+    
     logic        m7_valid;
     logic        m7_ready;
     logic [7:0]  m7_data;
@@ -77,7 +83,7 @@ module bnn_config_manager #(
         .m_last  (m7_last)
     );
 
-    //  M8 header parser / payload router front-end 
+    
     logic        hdr_valid;
     logic [7:0]  hdr_msg_type;
     logic [7:0]  hdr_layer_id;
@@ -112,7 +118,7 @@ module bnn_config_manager #(
         .msg_done            (msg_done)
     );
 
-    //  Header capture / accounting state 
+    
     logic [7:0]       cur_msg_type_r_q;
     logic [LID_W-1:0] cur_layer_id_r_q;
     logic [15:0]      cur_fan_in_r_q;
@@ -125,7 +131,7 @@ module bnn_config_manager #(
     logic             msg_done_seen_r_q;
     logic             cfg_done_r_q;
     logic             cfg_done_pending_r_q;
-    logic [4:0]       cfg_done_drain_r_q;
+    logic [9:0]       cfg_done_drain_r_q;
     logic             cfg_error_r_q;
     logic [15:0]      cfg_extra_t2_count_r_q;
     dbg_eos_strategy_t dbg_eos_strategy_r_q;
@@ -133,7 +139,7 @@ module bnn_config_manager #(
     // Threshold address bridge: M9 emits pure words, wrapper derives np/addr.
     logic [15:0] thr_neuron_idx_r_q;
 
-    //  Live header classification 
+    
     logic             hdr_layer_in_range;
     logic             hdr_bad_bpn0;
     logic             hdr_bad_nneur0;
@@ -141,6 +147,30 @@ module bnn_config_manager #(
     logic             hdr_extra_t2;
     logic             hdr_is_error;
     dbg_error_class_t dbg_error_class;
+    logic [31:0]      hdr_expected_weight_total_bytes_w;
+    logic [NLY-1:0][31:0] expected_weight_total_bytes_by_layer_w;
+
+    // The DUT topology is fixed by parameters, so valid weight-message byte
+    // counts are constants per layer. Using these constants avoids inferring a
+    // dynamic header-field multiplier on the config ingress timing path while
+    // preserving the bad-total-bytes negative check.
+    genvar gh;
+    generate
+        for (gh = 0; gh < NLY; gh++) begin : g_expected_weight_total_bytes
+            localparam int WEIGHT_BPN_GH = (TOPOLOGY[gh] + 7) / 8;
+            localparam int WEIGHT_TOTAL_GH = WEIGHT_BPN_GH * TOPOLOGY[gh+1];
+
+            assign expected_weight_total_bytes_by_layer_w[gh] = 32'(WEIGHT_TOTAL_GH);
+        end
+    endgenerate
+
+    always_comb begin
+        hdr_expected_weight_total_bytes_w = '0;
+        for (int i = 0; i < NLY; i++) begin
+            if (hdr_layer_id == 8'(i))
+                hdr_expected_weight_total_bytes_w = expected_weight_total_bytes_by_layer_w[i];
+        end
+    end
 
     assign hdr_layer_in_range = (hdr_layer_id < NLY);
     assign hdr_bad_bpn0       = (hdr_msg_type == 8'h00) &&
@@ -148,8 +178,8 @@ module bnn_config_manager #(
                                 (hdr_num_neurons != 16'd0);
     assign hdr_bad_nneur0     = (hdr_num_neurons == 16'd0);
     assign hdr_bad_total_bytes= (hdr_msg_type == 8'h00) &&
-                                (hdr_total_bytes !=
-                                 (32'(hdr_bytes_per_neuron) * 32'(hdr_num_neurons)));
+                                hdr_layer_in_range &&
+                                (hdr_total_bytes != hdr_expected_weight_total_bytes_w);
     assign hdr_extra_t2       = (hdr_msg_type == 8'h01) &&
                                 hdr_layer_in_range &&
                                 (hdr_layer_id == 8'(NLY - 1));
@@ -192,8 +222,15 @@ module bnn_config_manager #(
     logic final_cfg_seen;
     logic dispatch_idle;
     assign eos_seen_event = config_valid && config_ready && config_last;
-    assign final_cfg_seen = (msg_done && (eos_seen_r_q || eos_seen_event)) ||
-                            (eos_seen_event && msg_done_seen_r_q);
+    // Public AXI TLAST is the authoritative end-of-configuration marker. The
+    // drain/dispatch-idle sequence below still prevents cfg_done from rising
+    // until any in-flight header/payload dispatch has cleared, but allowing the
+    // accepted TLAST itself to arm the drain avoids a synthesized-netlist case
+    // where the internal msg_done pulse is optimized/pipelined away from the
+    // sticky msg_done_seen tracker.
+    assign final_cfg_seen = eos_seen_event ||
+                            (msg_done && eos_seen_r_q) ||
+                            (eos_seen_r_q && msg_done_seen_r_q);
 
     // Accounting + current-message capture block. Required because the wrapper
     // owns sticky status, late-EOS handling, and header-to-payload routing.
@@ -221,20 +258,24 @@ module bnn_config_manager #(
             eos_seen_r_q <= 1'b1;
 
         if (!cfg_done_r_q) begin
-            if (final_cfg_seen) begin
-                cfg_done_pending_r_q <= 1'b1;
-                cfg_done_drain_r_q   <= 5'd16;
-                if (msg_done && (eos_seen_r_q || eos_seen_event))
-                    dbg_eos_strategy_r_q <= EOS_LAST_BEAT;
-                else
-                    dbg_eos_strategy_r_q <= EOS_AFTER_TRAILER;
-            end else if (cfg_done_pending_r_q) begin
-                if (cfg_done_drain_r_q != 5'd0) begin
-                    cfg_done_drain_r_q <= cfg_done_drain_r_q - 5'd1;
+            // Arm cfg_done once when the final config message is observed, then
+            // give the drain FSM priority until it completes. This prevents a
+            // level-held final_cfg_seen condition from continuously reloading
+            // the drain counter and starving cfg_done in gate-level/netlist sim.
+            if (cfg_done_pending_r_q) begin
+                if (cfg_done_drain_r_q != '0) begin
+                    cfg_done_drain_r_q <= cfg_done_drain_r_q - 10'd1;
                 end else if (dispatch_idle) begin
                     cfg_done_r_q         <= 1'b1;
                     cfg_done_pending_r_q <= 1'b0;
                 end
+            end else if (final_cfg_seen) begin
+                cfg_done_pending_r_q <= 1'b1;
+                cfg_done_drain_r_q   <= 10'd512;
+                if (msg_done && (eos_seen_r_q || eos_seen_event))
+                    dbg_eos_strategy_r_q <= EOS_LAST_BEAT;
+                else
+                    dbg_eos_strategy_r_q <= EOS_AFTER_TRAILER;
             end
         end
 
@@ -261,8 +302,9 @@ module bnn_config_manager #(
     assign cfg_error          = cfg_error_r_q;
     assign cfg_extra_t2_count = cfg_extra_t2_count_r_q;
 
-    //  Weight-path fanout (M10 per non-input layer) 
+    
     logic [NLY-1:0]                  cfg_load_w;
+    logic [NLY-1:0]                  cfg_load_w_r_q;
     logic [NLY-1:0]                  route_to_w;
     logic [NLY-1:0]                  m10_byte_ready_w;
     logic [NLY-1:0]                  m10_wr_valid_w;
@@ -279,6 +321,8 @@ module bnn_config_manager #(
         for (gi = 0; gi < NLY; gi++) begin : g_m10
             localparam int THIS_P_W = (gi == 0) ? PARALLEL_INPUTS : PARALLEL_NEURONS[gi-1];
             localparam int THIS_P_N = PARALLEL_NEURONS[gi];
+            localparam int THIS_WPN = (TOPOLOGY[gi] + THIS_P_W - 1) / THIS_P_W;
+            localparam int THIS_BPN = (TOPOLOGY[gi] + 7) / 8;
 
             logic [THIS_P_W-1:0] m10_wr_data_i;
 
@@ -296,7 +340,9 @@ module bnn_config_manager #(
                 .P_N    (THIS_P_N),
                 .LID_W  (LID_W),
                 .NPID_W (NPID_W),
-                .ADDR_W (ADDR_W)
+                .ADDR_W (ADDR_W),
+                .STATIC_WORDS_PER_NEURON(THIS_WPN),
+                .STATIC_BYTES_PER_NEURON(THIS_BPN)
             ) u_m10 (
                 .clk                (clk),
                 .rst                (rst),
@@ -304,7 +350,7 @@ module bnn_config_manager #(
                 .cfg_bytes_per_neuron(route_bpn_w),
                 .cfg_num_neurons    (route_nneur_w),
                 .cfg_layer_id       (route_layer_id_w),
-                .cfg_load           (cfg_load_w[gi]),
+                .cfg_load           (cfg_load_w_r_q[gi]),
                 .byte_valid         (route_to_w[gi]),
                 .byte_ready         (m10_byte_ready_w[gi]),
                 .byte_data          (payload_data),
@@ -323,8 +369,20 @@ module bnn_config_manager #(
         end
     endgenerate
 
-    // ─── Threshold path (M9 + wrapper-owned np/addr derivation) ─────────────
+    // Break the header-decode/error-classification cone before it reaches the
+    // M10 reset/control pins. The one-cycle bubble is intentional: cur_* header
+    // registers are captured on hdr_valid, and the unpacker remains not-ready
+    // until the registered cfg_load advances it out of IDLE.
+    always_ff @(posedge clk) begin
+        cfg_load_w_r_q <= cfg_load_w;
+
+        if (rst)
+            cfg_load_w_r_q <= '0;
+    end
+
+    
     logic        cfg_load_t;
+    logic        cfg_load_t_r_q;
     logic        route_to_t;
     logic        m9_byte_valid_w;
     logic        m9_byte_ready_w;
@@ -335,6 +393,17 @@ module bnn_config_manager #(
     assign cfg_load_t      = hdr_valid && !hdr_is_error && (hdr_msg_type == 8'h01);
     assign route_to_t      = payload_valid && !cur_msg_error_r_q && (cur_msg_type_r_q == 8'h01);
     assign m9_byte_valid_w = route_to_t;
+
+    // Threshold payload emits 32-bit words after four payload bytes, so a
+    // registered cfg_load_t still resets the wrapper-owned neuron index before
+    // the first threshold write can be accepted while removing hdr_is_error
+    // from the threshold-index reset fanout path.
+    always_ff @(posedge clk) begin
+        cfg_load_t_r_q <= cfg_load_t;
+
+        if (rst)
+            cfg_load_t_r_q <= 1'b0;
+    end
 
     bnn_threshold_assembler u_m9 (
         .clk         (clk),
@@ -347,19 +416,16 @@ module bnn_config_manager #(
         .thresh_data (m9_thresh_data_w)
     );
 
-    int cur_layer_pn_w;
     logic selected_wr_ready_w;
     logic selected_thr_slot_open_w;
     dbg_routing_state_t dbg_routing_state;
 
     always_comb begin
-        cur_layer_pn_w          = 1;
         selected_wr_ready_w     = 1'b1;
         selected_thr_slot_open_w= 1'b1;
 
         for (int i = 0; i < NLY; i++) begin
             if (cur_layer_id_r_q == i[LID_W-1:0]) begin
-                cur_layer_pn_w           = layer_pn_local(i);
                 selected_wr_ready_w      = m10_byte_ready_w[i];
                 selected_thr_slot_open_w = ~cfg_thr_valid[i] || cfg_thr_ready[i];
             end
@@ -395,23 +461,39 @@ module bnn_config_manager #(
                            !m9_thresh_valid_w &&
                            !(|cfg_thr_valid);
 
-    logic [NPID_W-1:0] thr_np_w;
-    logic [ADDR_W-1:0] thr_addr_w;
+    logic [NLY-1:0][NPID_W-1:0] thr_np_by_layer_w;
+    logic [NLY-1:0][ADDR_W-1:0] thr_addr_by_layer_w;
 
-    always_comb begin
-        if (cur_layer_pn_w <= 1) begin
-            thr_np_w   = '0;
-            thr_addr_w = ADDR_W'(thr_neuron_idx_r_q);
-        end else begin
-            thr_np_w   = NPID_W'(thr_neuron_idx_r_q % cur_layer_pn_w);
-            thr_addr_w = ADDR_W'(thr_neuron_idx_r_q / cur_layer_pn_w);
+    // Threshold messages are serialized by logical neuron index. Convert that
+    // index into the layer engine's interleaved (NP, local-address) coordinate
+    // with constants per layer. The previous dynamic divide/modulo by selected
+    // layer parallelism synthesized into a 40+ level carry/LUT chain on the
+    // config path. Generate-time constants keep variable-depth support while
+    // letting Vivado reduce SFC hidden layers to shift/mask logic.
+    genvar gt;
+    generate
+        for (gt = 0; gt < NLY; gt++) begin : g_thr_idx_map
+            localparam int THR_P_N = PARALLEL_NEURONS[gt];
+            localparam bit THR_P_N_IS_POW2 = (THR_P_N > 0) && ((THR_P_N & (THR_P_N - 1)) == 0);
+            localparam int THR_NP_SHIFT = (THR_P_N > 1) ? $clog2(THR_P_N) : 1;
+
+            if (THR_P_N <= 1) begin : g_single_np
+                assign thr_np_by_layer_w[gt]   = '0;
+                assign thr_addr_by_layer_w[gt] = ADDR_W'(thr_neuron_idx_r_q);
+            end else if (THR_P_N_IS_POW2) begin : g_pow2_np
+                assign thr_np_by_layer_w[gt]   = NPID_W'(thr_neuron_idx_r_q[THR_NP_SHIFT-1:0]);
+                assign thr_addr_by_layer_w[gt] = ADDR_W'(thr_neuron_idx_r_q >> THR_NP_SHIFT);
+            end else begin : g_const_div_np
+                assign thr_np_by_layer_w[gt]   = NPID_W'(thr_neuron_idx_r_q % THR_P_N);
+                assign thr_addr_by_layer_w[gt] = ADDR_W'(thr_neuron_idx_r_q / THR_P_N);
+            end
         end
-    end
+    endgenerate
 
     // Required wrapper bridge: M9 is layer-agnostic, so the wrapper owns the
     // per-threshold neuron index that maps to (np, addr).
     always_ff @(posedge clk) begin
-        if (cfg_load_t) begin
+        if (cfg_load_t_r_q) begin
             thr_neuron_idx_r_q <= '0;
         end else if (m9_thresh_valid_w && m9_thresh_ready_w) begin
             thr_neuron_idx_r_q <= thr_neuron_idx_r_q + 16'd1;
@@ -421,8 +503,8 @@ module bnn_config_manager #(
             thr_neuron_idx_r_q <= '0;
     end
 
-    // Registered dispatch stage 
-    // Boundary register. The slot-open ready calculations
+    
+    // Boundary register per §9.3 rule 1. The slot-open ready calculations
     // above give each cfg output a 1-deep skid buffer so valid/data remain
     // stable even when the TB forces cfg_*_ready low for protocol testing.
     always_ff @(posedge clk) begin
@@ -445,8 +527,8 @@ module bnn_config_manager #(
                 (~cfg_thr_valid[i] || cfg_thr_ready[i])) begin
                 cfg_thr_valid[i] <= 1'b1;
                 cfg_thr_layer[i] <= cur_layer_id_r_q;
-                cfg_thr_np[i]    <= thr_np_w;
-                cfg_thr_addr[i]  <= thr_addr_w;
+                cfg_thr_np[i]    <= thr_np_by_layer_w[i];
+                cfg_thr_addr[i]  <= thr_addr_by_layer_w[i];
                 cfg_thr_data[i]  <= m9_thresh_data_w;
             end else if (cfg_thr_valid[i] && cfg_thr_ready[i]) begin
                 cfg_thr_valid[i] <= 1'b0;
@@ -459,7 +541,7 @@ module bnn_config_manager #(
         end
     end
 
-    // assertions 
+    
     property p_cfg_error_sticky;
         @(posedge clk) disable iff (rst)
         cfg_error |=> cfg_error;

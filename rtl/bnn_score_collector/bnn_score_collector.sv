@@ -23,15 +23,17 @@ module bnn_score_collector #(
     output logic                  m_last
 );
 
+    
     logic store_we;
     logic pass_cnt_we;
     logic pass_cnt_clr;
     logic output_we;
     logic m_valid_d;
 
+    
     logic pass_tc;
 
-    //  FSM 
+    
     bnn_score_collector_fsm u_fsm (
         .clk         (clk),
         .rst         (rst),
@@ -47,7 +49,7 @@ module bnn_score_collector #(
         .m_valid_d   (m_valid_d)
     );
 
-    //  Datapath 
+    
     bnn_score_collector_dp #(
         .P_N         (P_N),
         .NUM_NEURONS (NUM_NEURONS),

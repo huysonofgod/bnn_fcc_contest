@@ -27,6 +27,7 @@ module bnn_score_collector_fsm (
 
     state_t state_r, next_state;
 
+    
     always_ff @(posedge clk) begin
         state_r <= next_state;
 
@@ -34,6 +35,7 @@ module bnn_score_collector_fsm (
             state_r <= COLLECT;
     end
 
+    
     always_comb begin
         next_state   = state_r;
         s_ready      = 1'b0;

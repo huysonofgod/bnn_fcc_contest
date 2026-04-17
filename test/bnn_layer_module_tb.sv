@@ -14,13 +14,17 @@ module bnn_layer_module_tb #(
     parameter int  RAND_SEED       = 32'hDEAD_BEEF
 );
 
+    //
     // Localparams
+    //
     localparam int ITERS     = (FAN_IN + P_W - 1) / P_W;
     localparam int PASSES    = (NUM_NEURONS + P_N - 1) / P_N;
     localparam int WT_DEPTH  = ITERS * PASSES;
     localparam int THR_DEPTH = PASSES;
 
+    //
     // DUT Interface Signals
+    //
     logic                          clk = 1'b0;
     logic                          rst;
 
@@ -57,10 +61,14 @@ module bnn_layer_module_tb #(
     logic [15:0]                   cfg_thr_addr;
     logic [31:0]                   cfg_thr_data;
 
+    //
     // Clock Generation (100 MHz)
+    //
     always #5 clk = ~clk;
 
+    //
     // DUT Instantiation
+    //
     bnn_layer_module #(
         .LAYER_IDX       (LAYER_IDX),
         .FAN_IN          (FAN_IN),
@@ -74,7 +82,9 @@ module bnn_layer_module_tb #(
         .FANOUT_STAGES   (0)
     ) DUT (.*);
 
+    //
     // Transaction Type Definition
+    //
     typedef struct {
         bit [FAN_IN-1:0]      input_bits;
         bit                   exp_y        [NUM_NEURONS];
@@ -89,16 +99,22 @@ module bnn_layer_module_tb #(
         int                   vec_id;
     } obs_t;
 
+    //
     // Communication Channels (Mailboxes)
+    //
     mailbox #(trans_t) gen2drv = new();
     mailbox #(trans_t) drv2sb  = new();
     mailbox #(obs_t)   mon2sb  = new();
 
+    //
     // Reference Model Storage
+    //
     bit                golden_weights    [NUM_NEURONS][FAN_IN];
     bit [ACC_W-1:0]    golden_thresholds [NUM_NEURONS];
 
+    //
     // Functional Coverage
+    //
     // Coverage sampling signals
     logic cov_start, cov_busy, cov_done;
     logic cov_s_valid, cov_s_ready, cov_m_valid, cov_m_ready;
@@ -153,12 +169,16 @@ module bnn_layer_module_tb #(
     endgroup
     cg_functional cg_inst = new();
 
+    //
     // Scoreboard Counters
+    //
     int pass_count = 0;
     int fail_count = 0;
     int test_count = 0;
 
+    //
     // Reset Task (Timing Rule 3)
+    //
     task automatic reset_dut(int cycles = 8);
         @(posedge clk);
         rst           <= 1'b1;
@@ -184,7 +204,9 @@ module bnn_layer_module_tb #(
         repeat (3) @(posedge clk);
     endtask
 
+    //
     // Reference Model Generation
+    //
     function automatic void generate_random_model();
         for (int n = 0; n < NUM_NEURONS; n++) begin
             for (int b = 0; b < FAN_IN; b++)
@@ -193,7 +215,9 @@ module bnn_layer_module_tb #(
         end
     endfunction
 
+    //
     // Reference Compute (single vector → expected outputs)
+    //
     function automatic void compute_reference(
         input  bit [FAN_IN-1:0]   input_bits,
         output bit                exp_y        [NUM_NEURONS],
@@ -209,13 +233,17 @@ module bnn_layer_module_tb #(
         end
     endfunction
 
+    //
     // RAM Preload Task — drives cfg_wr_*/cfg_thr_* per interleaving rule
+    //
     // Interleaving:
     //   np_id          = neuron % P_N
     //   local_pass     = neuron / P_N
     //   wt_local_addr  = local_pass * ITERS + word_idx
     //   thr_local_addr = local_pass
+    //
     // Padding: final partial word (FAN_IN % P_W != 0) padded with 1s per spec
+    //
     task automatic preload_layer_rams();
         int np_id, local_pass, wt_local_addr, thr_local_addr;
         bit [P_W-1:0] word_val;
@@ -224,7 +252,8 @@ module bnn_layer_module_tb #(
         $display("[%0t] PRELOAD: starting weight RAM preload (FAN_IN=%0d ITERS=%0d PASSES=%0d)",
                  $realtime, FAN_IN, ITERS, PASSES);
 
-        // Weight preload        for (int n = 0; n < NUM_NEURONS; n++) begin
+        // ---- Weight preload ----
+        for (int n = 0; n < NUM_NEURONS; n++) begin
             np_id      = n % P_N;
             local_pass = n / P_N;
 
@@ -251,7 +280,8 @@ module bnn_layer_module_tb #(
         @(posedge clk);
         cfg_wr_valid <= 1'b0;
 
-        // Threshold preload (hidden layers only)        if (!IS_OUTPUT_LAYER) begin
+        // ---- Threshold preload (hidden layers only) ----
+        if (!IS_OUTPUT_LAYER) begin
             $display("[%0t] PRELOAD: starting threshold RAM preload", $realtime);
             for (int n = 0; n < NUM_NEURONS; n++) begin
                 np_id          = n % P_N;
@@ -273,7 +303,9 @@ module bnn_layer_module_tb #(
         repeat (5) @(posedge clk);
     endtask
 
+    //
     // Start Pulse Driver — issue one start per image
+    //
     task automatic issue_start();
         @(posedge clk);
         start <= 1'b1;
@@ -281,7 +313,9 @@ module bnn_layer_module_tb #(
         start <= 1'b0;
     endtask
 
+    //
     // Input Vector Driver — streams binary input word-by-word with handshake
+    //
     task automatic drive_input_vector(input bit [FAN_IN-1:0] input_bits);
         bit [P_W-1:0] word_val;
         int bit_idx;
@@ -313,7 +347,9 @@ module bnn_layer_module_tb #(
         s_last  <= 1'b0;
     endtask
 
+    //
     // Result Capture — Hidden Layer (M4 packed binary words)
+    //
     task automatic capture_hidden_result(
         output bit [NUM_NEURONS-1:0] actual_bits
     );
@@ -334,7 +370,9 @@ module bnn_layer_module_tb #(
         end
     endtask
 
+    //
     // Result Capture — Output Layer (M5 flat score vector)
+    //
     task automatic capture_output_result(
         output bit [ACC_W-1:0] actual_scores [NUM_NEURONS]
     );
@@ -348,7 +386,9 @@ module bnn_layer_module_tb #(
         end
     endtask
 
+    //
     // Run One Image — start + drive + capture + compare
+    //
     task automatic run_one_image(
         input  bit [FAN_IN-1:0] input_bits,
         input  bit              exp_y        [NUM_NEURONS],
@@ -400,8 +440,10 @@ module bnn_layer_module_tb #(
         end
     endtask
 
+    //
     // Generator Process
     // Produces constrained-random input vectors with expected outputs
+    //
     int gen_done = 0;
     // Hoisted up so earlier initial blocks can wait on it.
     int directed_done = 0;
@@ -414,7 +456,7 @@ module bnn_layer_module_tb #(
         wait (directed_done);
         repeat (5) @(posedge clk);
 
-        $display("Generator: Starting random stress: %0d vectors", NUM_TEST_VECS);
+        $display("[GEN] Starting random stress: %0d vectors", NUM_TEST_VECS);
 
         for (int v = 0; v < NUM_TEST_VECS; v++) begin
             for (int b = 0; b < FAN_IN; b++)
@@ -424,12 +466,14 @@ module bnn_layer_module_tb #(
             gen2drv.put(tx);
         end
         gen_done = 1;
-        $display("Generator: All %0d random vectors generated", NUM_TEST_VECS);
+        $display("[GEN] All %0d random vectors generated", NUM_TEST_VECS);
     end
 
+    //
     // Driver Process
     // Pulls transactions from gen2drv, drives start + input vector, forwards
     // expected data to scoreboard
+    //
     initial begin : driver
         trans_t tx;
 
@@ -457,8 +501,10 @@ module bnn_layer_module_tb #(
         end
     end
 
+    //
     // Monitor Process
     // Captures DUT outputs at posedge (Timing Rule 4)
+    //
     initial begin : monitor
         obs_t obs;
 
@@ -509,8 +555,10 @@ module bnn_layer_module_tb #(
         end
     end
 
+    //
     // Scoreboard Process
     // Compares expected (from drv2sb) vs observed (from mon2sb)
+    //
     int random_pass = 0;
     int random_fail = 0;
     int sb_done = 0;
@@ -531,7 +579,7 @@ module bnn_layer_module_tb #(
                 for (int n = 0; n < NUM_NEURONS; n++) begin
                     if (observed.actual_bits[n] !== expected.exp_y[n]) begin
                         random_fail++;
-                        $error("Scoreboard: vec %0d neuron %0d: y mismatch (got %0b, exp %0b)",
+                        $error("[SB] vec %0d neuron %0d: y mismatch (got %0b, exp %0b)",
                                expected.vec_id, n, observed.actual_bits[n], expected.exp_y[n]);
                     end else begin
                         random_pass++;
@@ -541,7 +589,7 @@ module bnn_layer_module_tb #(
                 for (int n = 0; n < NUM_NEURONS; n++) begin
                     if (observed.actual_scores[n] !== expected.exp_popcount[n]) begin
                         random_fail++;
-                        $error("Scoreboard: vec %0d neuron %0d: score mismatch (got %0d, exp %0d)",
+                        $error("[SB] vec %0d neuron %0d: score mismatch (got %0d, exp %0d)",
                                expected.vec_id, n, observed.actual_scores[n], expected.exp_popcount[n]);
                     end else begin
                         random_pass++;
@@ -553,10 +601,12 @@ module bnn_layer_module_tb #(
         end
 
         sb_done = 1;
-        $display("Scoreboard: Random stress complete: %0d pass, %0d fail", random_pass, random_fail);
+        $display("[SB] Random stress complete: %0d pass, %0d fail", random_pass, random_fail);
     end
 
+    //
     // SVA Properties (Gray Box — White Box Layer)
+    //
 
     // A1: busy asserts within 2 cycles after start pulse
     property p_busy_after_start;
@@ -602,14 +652,16 @@ module bnn_layer_module_tb #(
     a_no_start_while_busy: assert property (p_no_start_while_busy)
         else $warning("SVA: start asserted while busy — potential protocol violation");
 
+    //
     // Directed Test: LM-DT2 — busy/done pulse correctness
+    //
     task automatic test_lm_dt2_busy_done();
         bit [FAN_IN-1:0] input_bits;
         bit              exp_y        [NUM_NEURONS];
         bit [ACC_W-1:0]  exp_popcount [NUM_NEURONS];
         int done_seen = 0;
 
-        $display("Directed check: busy_done_pulse_correctness — start");
+        $display("[LM-DT2] busy_done_pulse_correctness — start");
 
         // Generate a simple input
         for (int b = 0; b < FAN_IN; b++)
@@ -628,7 +680,7 @@ module bnn_layer_module_tb #(
                         // Verify it's exactly 1 cycle
                         @(posedge clk);
                         if (done) begin
-                            $error("Directed check: done held high for >1 cycle");
+                            $error("[LM-DT2] done held high for >1 cycle");
                             fail_count++;
                         end
                         break;
@@ -638,27 +690,29 @@ module bnn_layer_module_tb #(
         join
 
         if (done_seen == 1) begin
-            $display("Directed check: done pulse observed correctly");
+            $display("[LM-DT2] done pulse observed correctly");
             pass_count++;
             test_count++;
         end else begin
-            $error("Directed check: done pulse not observed");
+            $error("[LM-DT2] done pulse not observed");
             fail_count++;
             test_count++;
         end
 
         repeat (5) @(posedge clk);
-        $display("Directed check: busy_done_pulse_correctness — done");
+        $display("[LM-DT2] busy_done_pulse_correctness — done");
     endtask
 
+    //
     // Directed Test: LM-ST2 — output backpressure
     // Toggle m_ready/score_ready off and on to test backpressure handling
+    //
     task automatic test_lm_st2_backpressure();
         bit [FAN_IN-1:0] input_bits;
         bit              exp_y        [NUM_NEURONS];
         bit [ACC_W-1:0]  exp_popcount [NUM_NEURONS];
 
-        $display("Stress check: output_backpressure — start");
+        $display("[LM-ST2] output_backpressure — start");
 
         for (int b = 0; b < FAN_IN; b++)
             input_bits[b] = $urandom_range(0, 1);
@@ -691,10 +745,12 @@ module bnn_layer_module_tb #(
         score_ready <= 1'b1;
 
         repeat (5) @(posedge clk);
-        $display("Stress check: output_backpressure — done");
+        $display("[LM-ST2] output_backpressure — done");
     endtask
 
+    //
     // Main Test Sequence
+    //
     initial begin : main_test
         bit [FAN_IN-1:0]      input_bits;
         bit                   exp_y        [NUM_NEURONS];
@@ -725,9 +781,10 @@ module bnn_layer_module_tb #(
         // Preload RAMs
         preload_layer_rams();
 
-        // Directed Tests
+        // ---- Directed Tests ----
+
         // WB-DT2/DT3: basic multi-vector test (proves preload + compute path)
-        $display("Directed run: Running %0d directed golden-model vectors...", 5);
+        $display("[DIRECTED] Running %0d directed golden-model vectors...", 5);
         for (int v = 0; v < 5; v++) begin
             for (int b = 0; b < FAN_IN; b++)
                 input_bits[b] = $urandom_range(0, 1);
@@ -744,7 +801,7 @@ module bnn_layer_module_tb #(
 
         // TB-DT6: threshold boundary classification (hidden layers only)
         if (!IS_OUTPUT_LAYER) begin
-            $display("Boundary check: threshold_boundary_classification — start");
+            $display("[TB-DT6] threshold_boundary_classification — start");
             // Create known threshold boundary test
             // Set all weights to 1 for neuron 0, so XNOR with all-1 input = FAN_IN
             // Set threshold to FAN_IN/2 exactly
@@ -789,11 +846,11 @@ module bnn_layer_module_tb #(
                 reset_dut();
                 preload_layer_rams();
             end
-            $display("Boundary check: threshold_boundary_classification — done");
+            $display("[TB-DT6] threshold_boundary_classification — done");
         end
 
         // LM-ST1: multi_vector_back_to_back (no idle between images)
-        $display("Stress check: multi_vector_back_to_back — start");
+        $display("[LM-ST1] multi_vector_back_to_back — start");
         for (int v = 0; v < 10; v++) begin
             for (int b = 0; b < FAN_IN; b++)
                 input_bits[b] = $urandom_range(0, 1);
@@ -802,7 +859,7 @@ module bnn_layer_module_tb #(
             // Minimal idle (just 1 cycle between images)
             @(posedge clk);
         end
-        $display("Stress check: multi_vector_back_to_back — done");
+        $display("[LM-ST1] multi_vector_back_to_back — done");
 
         $display("-------------------------------------------------------------");
         $display("  Directed tests complete: %0d pass, %0d fail",
@@ -820,12 +877,13 @@ module bnn_layer_module_tb #(
             end
             begin
                 #5ms;
-                $display("Timeout: Random stress did not complete in time");
+                $display("[TIMEOUT] Random stress did not complete in time");
             end
         join_any
         disable fork;
 
-        // Final Report        $display("=============================================================");
+        // ---- Final Report ----
+        $display("=============================================================");
         $display("  DIRECTED: %0d pass, %0d fail", pass_count, fail_count);
         $display("  RANDOM:   %0d pass, %0d fail", random_pass, random_fail);
         $display("  TOTAL:    %0d pass, %0d fail",
@@ -841,7 +899,9 @@ module bnn_layer_module_tb #(
         $finish;
     end
 
+    //
     // Watchdog timeout
+    //
     initial begin : timeout
         #10ms;
         $error("TIMEOUT: simulation exceeded 10 ms");

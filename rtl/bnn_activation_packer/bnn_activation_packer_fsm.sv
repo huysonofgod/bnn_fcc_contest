@@ -34,7 +34,7 @@ module bnn_activation_packer_fsm #(
     output logic                  flush_clr
 );
 
-    // State encoding
+    
     typedef enum logic [2:0] {
         IDLE   = 3'd0,
         ACCEPT = 3'd1,
@@ -45,7 +45,7 @@ module bnn_activation_packer_fsm #(
 
     state_t state_r, next_state;
 
-    // State register
+    
     always_ff @(posedge clk) begin
         state_r <= next_state;
 
@@ -53,7 +53,7 @@ module bnn_activation_packer_fsm #(
             state_r <= IDLE;
     end
 
-    // Next-state and output logic
+    
     always_comb begin
         // Defaults
         next_state  = state_r;
@@ -80,7 +80,7 @@ module bnn_activation_packer_fsm #(
                 out_valid_d = 1'b0;
 
                 if (m_valid) begin
-                    // Pending output beat must be consumed before accepting
+                    // Pending output beat must be consumed before we accept
                     // another input group.
                     next_state = ACCEPT;
                 end else if (s_valid) begin
@@ -101,16 +101,16 @@ module bnn_activation_packer_fsm #(
                     else
                         next_state = ACCEPT;
                 end
-                //else: hold in ACCEPT, wait
+                // else: hold in ACCEPT, wait
             end
 
             EMIT: begin
                 s_ready     = 1'b0;
-                //Service the output path when the register is empty or the
-                //current beat is being consumed. Loading a beat and draining
-                //the accumulator must happen together; otherwise a stalled
-                //first beat would remain in the accumulator and be reloaded
-                //as a duplicate later.
+                // Service the output path when the register is empty or the
+                // current beat is being consumed. Loading a beat and draining
+                // the accumulator must happen together; otherwise a stalled
+                // first beat would remain in the accumulator and be reloaded
+                // as a duplicate later.
                 if (!m_valid || m_ready) begin
                     out_we      = 1'b1;
                     out_valid_d = 1'b1;
@@ -142,10 +142,10 @@ module bnn_activation_packer_fsm #(
 
             FLUSH: begin
                 // Emit final partial word with 0-padding; m_last=1.
-                // On entry from EMIT, the output register can still hold the
-                // previous non-last word. Wait for that beat to clear, then
-                // load the true flush word, and only clear state once the
-                // consumed beat is the flush word.
+                // On entry from EMIT, the output register can still be holding
+                // the previous non-last word. Wait for that beat to clear, then
+                // load the true flush word, and only clear the image state once
+                // the visible beat being consumed is the flush word itself.
                 s_ready = 1'b0;
 
                 if (!m_valid) begin
@@ -166,7 +166,7 @@ module bnn_activation_packer_fsm #(
             end
 
             DONE: begin
-                // One-cycle cleanup
+                // 1-cycle cleanup
                 accum_we   = 1'b1;
                 accum_sel  = 2'b10;  // clear accumulator after final beat buffered
                 bits_we    = 1'b1;

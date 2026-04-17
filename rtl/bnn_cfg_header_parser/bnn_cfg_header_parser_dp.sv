@@ -35,7 +35,7 @@ module bnn_cfg_header_parser_dp (
     output logic [7:0]  payload_data      // = byte_data (wire)
 );
 
-    // Header shift register
+    
     logic [127:0] hdr_sr_r_q;
     logic [127:0] hdr_sr_next;
     logic [127:0] hdr_sr_view;
@@ -53,7 +53,7 @@ module bnn_cfg_header_parser_dp (
             hdr_sr_r_q <= '0;
     end
 
-    // Header byte counter (0..15)
+    
     logic [3:0] hdr_byte_cnt_r_q;
     logic [3:0] hdr_byte_cnt_next;
 
@@ -68,21 +68,22 @@ module bnn_cfg_header_parser_dp (
             hdr_byte_cnt_r_q <= 4'd0;
     end
 
-    // Header field extraction (combinational)
-    // Byte 0 arrives first; after 16 right shifts, byte 0 is at [7:0]
-    assign hdr_msg_type         = hdr_sr_view[7:0];
-    assign hdr_layer_id         = hdr_sr_view[15:8];
-    assign hdr_layer_inputs     = hdr_sr_view[31:16];
-    assign hdr_num_neurons      = hdr_sr_view[47:32];
-    assign hdr_bytes_per_neuron = hdr_sr_view[63:48];
-    assign hdr_total_bytes      = hdr_sr_view[95:64];
+    
+    // We extract on the 16th cycle (before the 16th shift is registered).
+    // After 15 right-shifts, byte 0 is at [15:8].
+    assign hdr_msg_type         = hdr_sr_r_q[15:8];
+    assign hdr_layer_id         = hdr_sr_r_q[23:16];
+    assign hdr_layer_inputs     = hdr_sr_r_q[39:24];
+    assign hdr_num_neurons      = hdr_sr_r_q[55:40];
+    assign hdr_bytes_per_neuron = hdr_sr_r_q[71:56];
+    assign hdr_total_bytes      = hdr_sr_r_q[103:72];
 
-    // Total bytes latch and payload byte counter
+    
     logic [31:0] total_bytes_r_q;
 
     always_ff @(posedge clk) begin
         if (total_bytes_we)
-            total_bytes_r_q <= hdr_sr_view[95:64];  // include current shifted byte
+            total_bytes_r_q <= hdr_total_bytes;
 
         if (rst)
             total_bytes_r_q <= 32'd0;
@@ -91,9 +92,9 @@ module bnn_cfg_header_parser_dp (
     logic [31:0] payload_byte_cnt_r_q;
     logic [31:0] pld_byte_cnt_next;
 
-    // payload_done: last payload byte (0-indexed up to total_bytes-1)
-    assign payload_done    = (payload_byte_cnt_r_q == (total_bytes_r_q - 32'd1));
-    assign pld_byte_cnt_next = pld_byte_clr ? 32'd0 : (payload_byte_cnt_r_q + 32'd1);
+    // payload_done: last payload byte (down counter reaches 1)
+    assign payload_done    = (payload_byte_cnt_r_q == 32'd1);
+    assign pld_byte_cnt_next = pld_byte_clr ? hdr_total_bytes : (payload_byte_cnt_r_q - 32'd1);
 
     always_ff @(posedge clk) begin
         if (pld_byte_we)
@@ -103,11 +104,11 @@ module bnn_cfg_header_parser_dp (
             payload_byte_cnt_r_q <= 32'd0;
     end
 
-    // Payload pass-through
+    
     // Zero-latency wire: payload bytes pass straight through
     assign payload_data = byte_data;
 
-    // Stream-end tracking
+    
     logic saw_last_next;
     assign saw_last_next = byte_last | saw_last_r_q;
 

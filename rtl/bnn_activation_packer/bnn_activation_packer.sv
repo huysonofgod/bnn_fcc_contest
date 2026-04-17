@@ -22,7 +22,7 @@ module bnn_activation_packer #(
     localparam int ACCUM_W   = IN_BITS + OUT_BITS;
     localparam int BIT_CNT_W = $clog2(ACCUM_W + 1);
 
-    // FSM to datapath control wires
+    
     logic        accum_we;
     logic [1:0]  accum_sel;
     logic        bits_we;
@@ -33,14 +33,14 @@ module bnn_activation_packer #(
     logic        flush_set;
     logic        flush_clr;
 
-    // Datapath to FSM status wires
+    
     logic                  can_emit;
     logic                  has_residual;
     logic [BIT_CNT_W-1:0]  bits_after_merge;
     logic [BIT_CNT_W-1:0]  bits_after_emit;
     logic                  flushing_r_q;
 
-    // FSM instance
+    
     bnn_activation_packer_fsm #(
         .IN_BITS  (IN_BITS),
         .OUT_BITS (OUT_BITS)
@@ -69,7 +69,7 @@ module bnn_activation_packer #(
         .flush_clr       (flush_clr)
     );
 
-    // Datapath instance
+    
     bnn_activation_packer_dp #(
         .IN_BITS  (IN_BITS),
         .OUT_BITS (OUT_BITS)

@@ -45,7 +45,7 @@ module bnn_unpack_ctrl #(
 
     assign output_slot_open = ~wr_valid | wr_ready;
 
-    //  state register 
+    
     always_ff @(posedge clk) begin
         state_r <= next_state;
 
@@ -53,7 +53,7 @@ module bnn_unpack_ctrl #(
             state_r <= IDLE;
     end
 
-    // next state + output logic
+    
     always_comb begin
         next_state      = state_r;
         byte_ready      = 1'b0;

@@ -63,7 +63,9 @@ endinterface
 
 module bnn_weight_unpacker_tb;
 
+    //
     // Main DUT Parameters
+    //
     parameter int P_W    = `BNN_WEIGHT_UNPACKER_TB_P_W;
     parameter int P_N    = `BNN_WEIGHT_UNPACKER_TB_P_N;
     parameter int LID_W  = 4;
@@ -85,7 +87,9 @@ module bnn_weight_unpacker_tb;
         logic              last_msg;
     } beat_t;
 
+    //
     // Clock / Interface / DUT
+    //
     logic clk = 0;
     always #5 clk = ~clk;
 
@@ -125,7 +129,9 @@ module bnn_weight_unpacker_tb;
         .wr_last_msg        (bfm.wr_last_msg)
     );
 
+    //
     // Transaction / Response Classes
+    //
     class m10_msg_item;
         rand int unsigned    fan_in;
         rand int unsigned    num_neurons;
@@ -198,7 +204,7 @@ module bnn_weight_unpacker_tb;
         );
             id = id_i;
             if (!randomize())
-                $fatal(1, "randomize() failed for item %0d", id_i);
+                $fatal(1, "[GEN] randomize() failed for item %0d", id_i);
             name = $sformatf("%s_%0d", prefix, id_i);
             build_payload();
         endfunction
@@ -291,7 +297,9 @@ module bnn_weight_unpacker_tb;
         endfunction
     endclass
 
+    //
     // Generator
+    //
     class m10_generator;
         mailbox #(m10_msg_item) drv_mbx;
         event                   drv_done;
@@ -346,7 +354,9 @@ module bnn_weight_unpacker_tb;
         endtask
     endclass
 
+    //
     // Driver
+    //
     class m10_driver;
         virtual bnn_weight_unpacker_bfm #(P_W, P_N, LID_W, NPID_W, ADDR_W) vif;
         mailbox #(m10_msg_item) drv_mbx;
@@ -475,7 +485,9 @@ module bnn_weight_unpacker_tb;
         endtask
     endclass
 
+    //
     // Output Monitor
+    //
     class m10_output_monitor;
         virtual bnn_weight_unpacker_bfm #(P_W, P_N, LID_W, NPID_W, ADDR_W) vif;
         mailbox #(m10_rsp_item) rsp_mbx;
@@ -518,7 +530,9 @@ module bnn_weight_unpacker_tb;
         endtask
     endclass
 
+    //
     // Scoreboard
+    //
     class m10_scoreboard;
         mailbox #(m10_msg_item) exp_mbx;
         mailbox #(m10_rsp_item) rsp_mbx;
@@ -544,7 +558,7 @@ module bnn_weight_unpacker_tb;
             end else begin
                 fail_count++;
                 fail_log.push_back($sformatf("[FAIL] %s: %s", label, msg));
-                $error("%s: %s", label, msg);
+                $error("[SB] %s: %s", label, msg);
             end
         endfunction
 
@@ -612,9 +626,9 @@ module bnn_weight_unpacker_tb;
 
         function void report_status();
             $display("============================================================");
-            $display("Messages checked : %0d", msg_count);
-            $display("Checks passed    : %0d", pass_count);
-            $display("Checks failed    : %0d", fail_count);
+            $display("[SB] Messages checked : %0d", msg_count);
+            $display("[SB] Checks passed    : %0d", pass_count);
+            $display("[SB] Checks failed    : %0d", fail_count);
             if (fail_count != 0) begin
                 foreach (fail_log[idx])
                     $display("%s", fail_log[idx]);
@@ -623,7 +637,9 @@ module bnn_weight_unpacker_tb;
         endfunction
     endclass
 
+    //
     // Environment / Test
+    //
     class m10_env;
         m10_generator      gen;
         m10_driver         drv;
@@ -680,17 +696,23 @@ module bnn_weight_unpacker_tb;
         endtask
     endclass
 
+    //
     // SVA (Gray Box)
+    //
 
-    // Output valid must hold until consumed.
+    //
+    // SVA-1: Output valid must hold until consumed.
+    //
     property p_wr_valid_hold;
         @(posedge clk) disable iff (bfm.rst)
         (bfm.wr_valid && !bfm.wr_ready) |=> bfm.wr_valid;
     endproperty
     assert property (p_wr_valid_hold)
-    else $error("Assertion: wr_valid dropped before wr_ready");
+    else $error("[SVA] wr_valid dropped before wr_ready");
 
-    // Full output payload must remain stable during backpressure.
+    //
+    // SVA-2: Full output payload must remain stable during backpressure.
+    //
     property p_wr_payload_stable;
         @(posedge clk) disable iff (bfm.rst)
         (bfm.wr_valid && !bfm.wr_ready) |=> $stable({
@@ -704,50 +726,62 @@ module bnn_weight_unpacker_tb;
         });
     endproperty
     assert property (p_wr_payload_stable)
-    else $error("Assertion: Output payload changed during backpressure");
+    else $error("[SVA] Output payload changed during backpressure");
 
-    // byte_ready is qualified by ACCUMULATE state exactly as documented.
+    //
+    // SVA-3: byte_ready is qualified by ACCUMULATE state exactly as documented.
+    //
     property p_byte_ready_qualified;
         @(posedge clk) disable iff (bfm.rst)
         (DUT.u_ctrl.state_r == DUT.u_ctrl.ACCUMULATE) |->
             (bfm.byte_ready == (~bfm.wr_valid || bfm.wr_ready));
     endproperty
     assert property (p_byte_ready_qualified)
-    else $error("Assertion: byte_ready mismatch in ACCUMULATE state");
+    else $error("[SVA] byte_ready mismatch in ACCUMULATE state");
 
-    // byte_ready must be low outside ACCUMULATE.
+    //
+    // SVA-4: byte_ready must be low outside ACCUMULATE.
+    //
     property p_byte_ready_only_in_accumulate;
         @(posedge clk) disable iff (bfm.rst)
         (DUT.u_ctrl.state_r != DUT.u_ctrl.ACCUMULATE) |-> !bfm.byte_ready;
     endproperty
     assert property (p_byte_ready_only_in_accumulate)
-    else $error("Assertion: byte_ready asserted outside ACCUMULATE");
+    else $error("[SVA] byte_ready asserted outside ACCUMULATE");
 
-    // bits_in counter must remain within accumulator capacity.
+    //
+    // SVA-5: bits_in counter must remain within accumulator capacity.
+    //
     property p_bits_in_bounded;
         @(posedge clk) disable iff (bfm.rst)
         DUT.u_dp.bits_in_r_q <= BIA_W'(ACCUM_W);
     endproperty
     assert property (p_bits_in_bounded)
-    else $error("Assertion: bits_in_r_q overflowed ACCUM_W");
+    else $error("[SVA] bits_in_r_q overflowed ACCUM_W");
 
-    // txn_we must produce a valid output beat on the next cycle.
+    //
+    // SVA-6: txn_we must produce a valid output beat on the next cycle.
+    //
     property p_txn_we_drives_wr_valid;
         @(posedge clk) disable iff (bfm.rst)
         DUT.txn_we |=> bfm.wr_valid;
     endproperty
     assert property (p_txn_we_drives_wr_valid)
-    else $error("Assertion: txn_we failed to raise wr_valid");
+    else $error("[SVA] txn_we failed to raise wr_valid");
 
-    // wr_last_msg implies wr_last_word and wr_last_neuron.
+    //
+    // SVA-7: wr_last_msg implies wr_last_word and wr_last_neuron.
+    //
     property p_last_msg_implies_terminal_flags;
         @(posedge clk) disable iff (bfm.rst)
         (bfm.wr_valid && bfm.wr_last_msg) |-> (bfm.wr_last_word && bfm.wr_last_neuron);
     endproperty
     assert property (p_last_msg_implies_terminal_flags)
-    else $error("Assertion: wr_last_msg asserted without terminal flags");
+    else $error("[SVA] wr_last_msg asserted without terminal flags");
 
-    // No unknown output payload when wr_valid is asserted.
+    //
+    // SVA-8: No unknown output payload when wr_valid is asserted.
+    //
     property p_no_unknown_output;
         @(posedge clk) disable iff (bfm.rst)
         bfm.wr_valid |-> !$isunknown({
@@ -761,9 +795,11 @@ module bnn_weight_unpacker_tb;
         });
     endproperty
     assert property (p_no_unknown_output)
-    else $error("Assertion: Unknown output payload while wr_valid=1");
+    else $error("[SVA] Unknown output payload while wr_valid=1");
 
+    //
     // Functional Coverage
+    //
     covergroup cg_m10 @(posedge clk iff (!bfm.rst));
         option.per_instance = 1;
 
@@ -826,7 +862,9 @@ module bnn_weight_unpacker_tb;
 
     cg_m10 cg_inst = new();
 
+    //
     // Top-Level Control
+    //
     m10_base_test test;
 
     initial begin

@@ -5,13 +5,59 @@ clock: clk
 device: XCU250-FIGD2104-2L-E
 
 files:
-  # Add all required source files:
-  # e.g.:
-  #- ../rtl/binary_neuron.sv
-  #- ../rtl/binary_layer.sv
-  #- ../rtl/bnn.sv
+  # Config manager package + top (package must come first for import)
+  - ../rtl/bnn_config_manager/bnn_cfg_mgr_pkg.sv
+  - ../rtl/bnn_config_manager/bnn_config_manager.sv
 
-  # These are common to all projects.
+  # M7 byte filter
+  - ../rtl/bnn_byte_filter/bnn_byte_filter.sv
+  - ../rtl/bnn_byte_filter/bnn_byte_filter_fsm.sv
+  - ../rtl/bnn_byte_filter/bnn_byte_filter_dp.sv
+
+  # M8 header parser
+  - ../rtl/bnn_cfg_header_parser/bnn_cfg_header_parser.sv
+  - ../rtl/bnn_cfg_header_parser/bnn_cfg_header_parser_fsm.sv
+  - ../rtl/bnn_cfg_header_parser/bnn_cfg_header_parser_dp.sv
+
+  # M9 threshold assembler
+  - ../rtl/bnn_threshold_assembler/bnn_threshold_assembler.sv
+  - ../rtl/bnn_threshold_assembler/bnn_threshold_assembler_dp.sv
+
+  # M10 weight unpacker
+  - ../rtl/bnn_weight_unpacker/bnn_weight_unpacker.sv
+  - ../rtl/bnn_unpack_ctrl/bnn_unpack_ctrl.sv
+  - ../rtl/bnn_unpack_datapath/bnn_unpack_datapath.sv
+
+  # Input path
+  - ../rtl/bnn_input_buffer/bnn_input_buffer.sv
+  - ../rtl/bnn_input_binarizer/bnn_input_binarizer.sv
+  - ../rtl/bnn_input_binarizer/bnn_input_binarizer_dp.sv
+  - ../rtl/bnn_image_replay_buffer/bnn_image_replay_buffer.sv
+
+  # Layer engine composition
+  - ../rtl/bnn_layer_engine/bnn_layer_engine.sv
+  - ../rtl/bnn_layer_ctrl/bnn_layer_ctrl.sv
+  - ../rtl/bnn_layer_ctrl/bnn_layer_ctrl_fsm.sv
+  - ../rtl/bnn_seq_addr_gen.sv
+  - ../rtl/bnn_dp_ram/bnn_dp_ram.sv
+  - ../rtl/bnn_np_bank/bnn_np_bank.sv
+  - ../rtl/bnn_fanout_buf/bnn_fanout_buf.sv
+
+  # Activation packer / score collector / neuron processor
+  - ../rtl/bnn_activation_packer/bnn_activation_packer.sv
+  - ../rtl/bnn_activation_packer/bnn_activation_packer_fsm.sv
+  - ../rtl/bnn_activation_packer/bnn_activation_packer_dp.sv
+  - ../rtl/bnn_score_collector/bnn_score_collector.sv
+  - ../rtl/bnn_score_collector/bnn_score_collector_fsm.sv
+  - ../rtl/bnn_score_collector/bnn_score_collector_dp.sv
+  - ../rtl/bnn_neuron_processor/neuron_processor.sv
+  - ../rtl/bnn_neuron_processor/NP_fsm.sv
+  - ../rtl/bnn_neuron_processor/NP_datapath.sv
+
+  # Argmax
+  - ../rtl/bnn_argmax/bnn_argmax.sv
+
+  # Top bnn_fcc and timing wrapper
   - ../rtl/bnn_fcc.sv
   - rtl/bnn_fcc_timing.sv
 
@@ -22,6 +68,8 @@ parameters:
   OUTPUT_DATA_WIDTH: [4]
   OUTPUT_BUS_WIDTH: [8]
   TOTAL_LAYERS: [4]
+  FANOUT_STAGES: [1]
+
   # NOTE: TOPOLOGY is ommitted here since you can't specify array parameters from the command line.
   # Make sure you don't change the default value in bnn_fcc_timing 
 

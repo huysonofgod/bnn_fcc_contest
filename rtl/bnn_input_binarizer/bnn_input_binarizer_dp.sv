@@ -17,12 +17,12 @@ module bnn_input_binarizer_dp #(
     input  logic               m_ready
 );
 
-    // Registers 
+    
     logic [P_W-1:0] m_data_r_q;
     logic           m_last_r_q;
     logic           m_valid_r_q;
 
-    //  Binarization 
+    
     // For each pixel i: binary = MSB of pixel byte AND keep bit
     logic [P_W-1:0] binary_bits;
     genvar i;
@@ -32,7 +32,7 @@ module bnn_input_binarizer_dp #(
         end
     endgenerate
 
-    // Skid buffer control 
+    
     logic slot_free;
     logic accept;
     logic m_valid_next;
@@ -52,7 +52,7 @@ module bnn_input_binarizer_dp #(
             m_valid_next = m_valid_r_q;  // hold
     end
 
-    //  output registers 
+    
     always_ff @(posedge clk) begin
         m_valid_r_q <= m_valid_next;
 
@@ -68,7 +68,7 @@ module bnn_input_binarizer_dp #(
         end
     end
 
-    //  Output assignments 
+    
     assign m_valid = m_valid_r_q;
     assign m_data  = m_data_r_q;
     assign m_last  = m_last_r_q;

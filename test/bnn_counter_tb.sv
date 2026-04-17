@@ -1,16 +1,18 @@
-`timescale 1ns/10ps
+`timescale 1ns/1ps
 
 module bnn_counter_tb;
 
-    //==========================================================================
+    //
     // Parameters
-    //==========================================================================
+    //
     parameter int WIDTH     = 8;
     parameter int RESET_VAL = 0;
 
-    //==========================================================================
+    localparam int RANDOM_STRESS_CYCLES = 10000;
+
+    //
     // DUT Interface Signals
-    //==========================================================================
+    //
     logic               clk = 0;
     logic               rst = 1;
     logic               en;
@@ -21,14 +23,14 @@ module bnn_counter_tb;
     logic               tc;
     logic               tc_pulse;
 
-    //==========================================================================
+    //
     // Clock Generation (100 MHz, 10ns period)
-    //==========================================================================
+    //
     always #5 clk = ~clk;
 
-    //==========================================================================
+    //
     // DUT Instantiation
-    //==========================================================================
+    //
     bnn_counter #(
         .WIDTH     (WIDTH),
         .RESET_VAL (RESET_VAL)
@@ -44,89 +46,91 @@ module bnn_counter_tb;
         .tc_pulse (tc_pulse)
     );
 
-    //==========================================================================
+    //
     // SVA Properties (Gray Box)
-    //==========================================================================
+    //
 
-    //--------------------------------------------------------------------------
-    // tc_pulse is exactly 1 clock cycle wide
+    //
+    // SVA-1: tc_pulse is exactly 1 clock cycle wide
+    // RATIONALE: Downstream modules rely on single-cycle pulses for counting.
     // When tc_pulse asserts, it must deassert on the very next cycle.
-    //--------------------------------------------------------------------------
+    //
     property p_tc_pulse_single_cycle;
         @(posedge clk) disable iff (rst)
         tc_pulse |=> !tc_pulse;
     endproperty
     assert property (p_tc_pulse_single_cycle)
-    else $error("[assertion] FAIL: tc_pulse was high for more than 1 cycle");
+    else $error("[SVA] FAIL: tc_pulse was high for more than 1 cycle");
 
-    //--------------------------------------------------------------------------
-    // tc_pulse fires only when tc AND en were both true in prior cycle
-    // tc_pulse = registered(tc & en). Without en, counter is stalled
+    //
+    // SVA-2: tc_pulse fires only when tc AND en were both true in prior cycle
+    // RATIONALE: tc_pulse = registered(tc & en). Without en, counter is stalled
     // so no pulse should fire.
-    //--------------------------------------------------------------------------
+    //
     property p_tc_pulse_requires_tc_and_en;
         @(posedge clk) disable iff (rst)
         tc_pulse |-> $past(tc && en);
     endproperty
     assert property (p_tc_pulse_requires_tc_and_en)
-    else $error("[assertion] FAIL: tc_pulse fired without prior tc && en");
+    else $error("[SVA] FAIL: tc_pulse fired without prior tc && en");
 
-    //--------------------------------------------------------------------------
-    // Count increments only when en=1 and load=0 and not at tc
-    // Verify enable gating works -- count should advance by +1
+    //
+    // SVA-3: Count increments only when en=1 and load=0 and not at tc
+    // RATIONALE: Verify enable gating works -- count should advance by +1
     // when enabled, not loading, and not at terminal count wrap.
-    //--------------------------------------------------------------------------
+    //
     property p_count_increments_on_en;
         @(posedge clk) disable iff (rst)
         (en && !load && !tc) |=> (count == ($past(count) + WIDTH'(1)));
     endproperty
     assert property (p_count_increments_on_en)
-    else $error("[assertion] FAIL: count did not increment when en=1, load=0, no wrap");
+    else $error("[SVA] FAIL: count did not increment when en=1, load=0, no wrap");
 
-    //--------------------------------------------------------------------------
-    // Count holds steady when en=0 and load=0
-    //--------------------------------------------------------------------------
+    //
+    // SVA-4: Count holds steady when en=0 and load=0
+    // RATIONALE: Counter must freeze when disabled. Any change is a bug.
+    //
     property p_count_holds_when_disabled;
         @(posedge clk) disable iff (rst)
         (!en && !load) |=> (count == $past(count));
     endproperty
     assert property (p_count_holds_when_disabled)
-    else $error("[assertion] FAIL: count changed while en=0 and load=0");
+    else $error("[SVA] FAIL: count changed while en=0 and load=0");
 
-    //--------------------------------------------------------------------------
-    // Load has priority over enable (synchronous parallel load)
-    // When load=1, the counter must capture load_val regardless of
+    //
+    // SVA-5: Load has priority over enable (synchronous parallel load)
+    // RATIONALE: When load=1, the counter must capture load_val regardless of
     // en state. This tests the MUX priority encoding.
-    //--------------------------------------------------------------------------
+    //
     property p_load_priority;
         @(posedge clk) disable iff (rst)
         load |=> (count == $past(load_val));
     endproperty
     assert property (p_load_priority)
-    else $error("[assertion] FAIL: load did not override -- count != past load_val");
+    else $error("[SVA] FAIL: load did not override -- count != past load_val");
 
-    //--------------------------------------------------------------------------
-    // Counter wraps to RESET_VAL after terminal count with enable
-    // When count==max_val and en=1 (no load), next cycle count
+    //
+    // SVA-6: Counter wraps to RESET_VAL after terminal count with enable
+    // RATIONALE: When count==max_val and en=1 (no load), next cycle count
     // must be RESET_VAL. Verifies wrap-around behavior.
-    //--------------------------------------------------------------------------
+    //
     property p_wrap_after_tc;
         @(posedge clk) disable iff (rst)
         (tc && en && !load) |=> (count == WIDTH'(RESET_VAL));
     endproperty
     assert property (p_wrap_after_tc)
-    else $error("[assertion] FAIL: counter did not wrap to RESET_VAL after tc+en");
+    else $error("[SVA] FAIL: counter did not wrap to RESET_VAL after tc+en");
 
-    //==========================================================================
+    //
     // Covergroups
-    //==========================================================================
+    //
 
-    //--------------------------------------------------------------------------
+    //
     // COVERGROUP: Counter edge cases, control combos, and rollover cross
     // Tracks count boundaries (0, 1, mid, near-max, at-max), max_val
     // settings, control signal combos (en x load), tc_pulse firing, and
     // cross coverage of control state at rollover point.
-    //--------------------------------------------------------------------------
+    //
     logic [WIDTH-1:0] max_val_latched;
     always_ff @(posedge clk) max_val_latched <= max_val;
 
@@ -171,9 +175,9 @@ module bnn_counter_tb;
 
     cg_counter cg_inst = new();
 
-    //==========================================================================
+    //
     // Scoreboard
-    //==========================================================================
+    //
     int pass_count = 0;
     int fail_count = 0;
     string fail_log[$];   // collect per-case failure messages
@@ -189,9 +193,9 @@ module bnn_counter_tb;
         end
     endfunction
 
-    //==========================================================================
+    //
     // Reset Task (Timing Rule 3: NBA at posedge)
-    //==========================================================================
+    //
     task automatic reset_dut();
         rst <= 1'b1;
         en  <= 1'b0;
@@ -203,11 +207,11 @@ module bnn_counter_tb;
         repeat (3) @(posedge clk);
     endtask
 
-    //==========================================================================
+    //
     // Test Scenarios
-    //==========================================================================
+    //
 
-    // Free-run count from 0 to max_val and verify wrap behavior
+    //--- Test 1: Free-run count from 0 to max_val, verify wrap ----------------
     task automatic test_free_run();
         logic [WIDTH-1:0] expected;
         $display("[TEST] test_free_run: max_val=10");
@@ -231,7 +235,7 @@ module bnn_counter_tb;
         @(posedge clk);
     endtask
 
-    // Load various values and verify immediate capture
+    //--- Test 2: Load test -- various values, verify immediate capture --------
     task automatic test_load();
         $display("[TEST] test_load: load various values");
         @(posedge clk);
@@ -250,7 +254,7 @@ module bnn_counter_tb;
         end
     endtask
 
-    // Toggle enable and verify the count freezes while disabled
+    //--- Test 3: Enable gating -- toggle en, verify count freezes -------------
     task automatic test_enable_gating();
         logic [WIDTH-1:0] frozen_val;
         $display("[TEST] test_enable_gating");
@@ -278,7 +282,7 @@ module bnn_counter_tb;
         en <= 1'b0;
     endtask
 
-    // Verify terminal-count behavior when max_val is zero
+    //--- Test 4: max_val=0 -- tc fires immediately ----------------------------
     task automatic test_max_val_zero();
         $display("[TEST] test_max_val_zero (edge case)");
         reset_dut();
@@ -304,7 +308,7 @@ module bnn_counter_tb;
         en <= 1'b0;
     endtask
 
-    // Verify two-state counter behavior when max_val is one
+    //--- Test 5: max_val=1 -- two-state counter --------------------------------
     task automatic test_max_val_one();
         $display("[TEST] test_max_val_one (two-state)");
         reset_dut();
@@ -323,7 +327,7 @@ module bnn_counter_tb;
         en <= 1'b0;
     endtask
 
-    // Verify load takes priority when terminal count and load coincide
+    //--- Test 6: Load during tc -- verify load takes priority ------------------
     task automatic test_load_during_tc();
         $display("[TEST] test_load_during_tc");
         reset_dut();
@@ -346,41 +350,106 @@ module bnn_counter_tb;
         en <= 1'b0;
     endtask
 
-    // Constrained-random stress over many cycles
-    task automatic test_random_stress();
-        logic [WIDTH-1:0] prev_count;
-        logic prev_en, prev_load;
-        logic [WIDTH-1:0] prev_load_val, prev_max_val;
-        int stress_cycles = 2000;
-        $display("[TEST] test_random_stress: %0d cycles", stress_cycles);
+    //--- Test 7: Load while enable is high -- explicit load priority combo ----
+    task automatic test_load_while_en();
+        $display("[TEST] test_load_while_en");
+        reset_dut();
+        @(posedge clk);
+        max_val <= 8'd200;
+        en      <= 1'b1;
+        load    <= 1'b0;
+
+        repeat (3) @(posedge clk);
+        @(posedge clk);
+        load     <= 1'b1;
+        load_val <= 8'd99;
+        @(posedge clk);
+        load <= 1'b0;
+        @(posedge clk);
+        check("load_while_en", count == 8'd99,
+              $sformatf("expected 99, got %0d", count));
+        en <= 1'b0;
+    endtask
+
+    //--- Test 8: Full-range boundary walk -- force 254/255/wrap coverage -----
+    task automatic test_full_range_boundaries();
+        $display("[TEST] test_full_range_boundaries");
+        reset_dut();
+        @(posedge clk);
+        max_val  <= 8'hFF;
+        en       <= 1'b0;
+        load     <= 1'b1;
+        load_val <= 8'hFD;
+        @(posedge clk);
+        load <= 1'b0;
+        en   <= 1'b1;
+
+        @(posedge clk);
+        @(posedge clk);
+        check("full_range_254", count == 8'hFE,
+              $sformatf("expected 254, got %0d", count));
+        @(posedge clk);
+        check("full_range_255", count == 8'hFF,
+              $sformatf("expected 255, got %0d", count));
+        @(posedge clk);
+        check("full_range_wrap", count == WIDTH'(RESET_VAL),
+              $sformatf("expected RESET_VAL=%0d, got %0d", RESET_VAL, count));
+        en <= 1'b0;
+    endtask
+
+    //--- Test 9: Near-max load while enabled ----------------------------------
+    task automatic test_nearmax_load_while_en();
+        $display("[TEST] test_nearmax_load_while_en");
         reset_dut();
 
         @(posedge clk);
-        max_val <= 8'd20;  // moderate range
+        max_val  <= 8'hFF;
+        en       <= 1'b0;
+        load     <= 1'b1;
+        load_val <= 8'hFD;
+        @(posedge clk);
+        load <= 1'b0;
+        en   <= 1'b1;
+
+        wait (count == 8'hFE);
+        load     <= 1'b1;
+        load_val <= 8'h33;
+        @(posedge clk);
+        load <= 1'b0;
+        @(posedge clk);
+
+        check("nearmax_load_while_en", count == 8'h33,
+              $sformatf("expected 0x33, got 0x%02h", count));
+
+        en <= 1'b0;
+        @(posedge clk);
+    endtask
+
+    //--- Test 10: Random stress -- constrained random for closure -------------
+    task automatic test_random_stress();
+        $display("[TEST] test_random_stress: %0d cycles", RANDOM_STRESS_CYCLES);
+        reset_dut();
+
+        @(posedge clk);
+        max_val <= 8'd20;
         en      <= 1'b0;
         load    <= 1'b0;
 
-        for (int c = 0; c < stress_cycles; c++) begin
-            prev_count    = count;
-            prev_en       = en;
-            prev_load     = load;
-            prev_load_val = load_val;
-            prev_max_val  = max_val;
-
-            // Randomize controls
+        for (int c = 0; c < RANDOM_STRESS_CYCLES; c++) begin
             @(posedge clk);
             en       <= $urandom_range(0, 1);
-            load     <= ($urandom_range(0, 99) < 10) ? 1'b1 : 1'b0; // 10% load
+            load     <= ($urandom_range(0, 99) < 10);
             load_val <= $urandom();
-            if ($urandom_range(0, 99) < 5)     // 5% change max_val
+            if ($urandom_range(0, 99) < 5)
                 max_val <= $urandom_range(0, 255);
         end
+
         en   <= 1'b0;
         load <= 1'b0;
         @(posedge clk);
     endtask
 
-    // Counter does not overflow past WIDTH bits (negative test)
+    //--- Test 11 (Negative): Counter does NOT overflow past WIDTH bits ---------
     task automatic test_no_overflow();
         $display("[TEST] test_no_overflow: max_val = all-ones");
         reset_dut();
@@ -397,9 +466,9 @@ module bnn_counter_tb;
         en <= 1'b0;
     endtask
 
-    //==========================================================================
+    //
     // Main Test Sequence
-    //==========================================================================
+    //
     initial begin
         $display("============================================================");
         $display("  bnn_counter Testbench (CRV, Gray-Box)");
@@ -423,6 +492,12 @@ module bnn_counter_tb;
 
         test_load_during_tc();
 
+        test_load_while_en();
+
+        test_full_range_boundaries();
+
+        test_nearmax_load_while_en();
+
         test_no_overflow();
 
         test_random_stress();
@@ -430,9 +505,9 @@ module bnn_counter_tb;
         // Allow final SVA evaluation
         repeat (20) @(posedge clk);
 
-        //======================================================================
+        //
         // Scoreboard Summary
-        //======================================================================
+        //
         $display("");
         $display("============================================================");
         $display("  SCOREBOARD SUMMARY -- bnn_counter");

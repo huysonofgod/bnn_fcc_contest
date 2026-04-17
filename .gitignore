@@ -8,3 +8,6 @@ transcript
 *.sh
 *.f
 rtl/bnn_np_bank/deps.f
+openflex/build_questa
+openflex/build_vivado
+run.log

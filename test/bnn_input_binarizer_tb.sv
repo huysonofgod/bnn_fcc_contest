@@ -2,15 +2,16 @@
 
 module bnn_input_binarizer_tb;
 
-    //==========================================================================
+    //
     // Parameters
-    //==========================================================================
+    //
     parameter int BUS_WIDTH = 64;
     parameter int P_W       = 8;
+    localparam int RANDOM_BEATS = 1000;
 
-    //==========================================================================
+    //
     // DUT Interface Signals
-    //==========================================================================
+    //
     logic               clk = 0;
     logic               rst = 1;
     // Slave interface
@@ -25,14 +26,14 @@ module bnn_input_binarizer_tb;
     logic               m_last;
     logic               m_ready;
 
-    //==========================================================================
+    //
     // Clock Generation (100 MHz)
-    //==========================================================================
+    //
     always #5 clk = ~clk;
 
-    //==========================================================================
+    //
     // DUT Instantiation
-    //==========================================================================
+    //
     bnn_input_binarizer #(
         .BUS_WIDTH (BUS_WIDTH),
         .P_W       (P_W)
@@ -50,69 +51,73 @@ module bnn_input_binarizer_tb;
         .m_ready (m_ready)
     );
 
-    //==========================================================================
-    // SVA Properties
-    //==========================================================================
+    //
+    // SVA Properties (Gray Box)
+    //
 
-    //--------------------------------------------------------------------------
-    // AXI-Stream valid-hold on master interface -- once m_valid is
+    //
+    // SVA-1: AXI-Stream valid-hold on master interface -- once m_valid is
     // asserted, it must stay high until m_ready completes the handshake.
-    //--------------------------------------------------------------------------
+    // RATIONALE: AXI4-Stream protocol compliance for downstream consumers.
+    //
     property p_m_valid_hold;
         @(posedge clk) disable iff (rst)
         (m_valid && !m_ready) |=> m_valid;
     endproperty
     assert property (p_m_valid_hold)
-    else $error("[assertion] FAIL: m_valid dropped without m_ready handshake");
+    else $error("[SVA] FAIL: m_valid dropped without m_ready handshake");
 
-    //--------------------------------------------------------------------------
-    // m_data stable during backpressure -- when m_valid && !m_ready,
+    //
+    // SVA-2: m_data stable during backpressure -- when m_valid && !m_ready,
     // the data output must not change.
-    //--------------------------------------------------------------------------
+    // RATIONALE: AXI4-Stream data stability requirement.
+    //
     property p_m_data_stable;
         @(posedge clk) disable iff (rst)
         (m_valid && !m_ready) |=> $stable(m_data);
     endproperty
     assert property (p_m_data_stable)
-    else $error("[assertion] FAIL: m_data changed during backpressure");
+    else $error("[SVA] FAIL: m_data changed during backpressure");
 
-    //--------------------------------------------------------------------------
-    // 1-cycle pipeline latency (skid buffer) -- when a slave handshake
+    //
+    // SVA-3: 1-cycle pipeline latency (skid buffer) -- when a slave handshake
     // occurs (s_valid & s_ready), m_valid must be high in the next cycle.
-    //--------------------------------------------------------------------------
+    // RATIONALE: Skid buffer has exactly 1-cycle latency from input to output.
+    //
     property p_pipeline_latency;
         @(posedge clk) disable iff (rst)
         (s_valid && s_ready) |=> m_valid;
     endproperty
     assert property (p_pipeline_latency)
-    else $error("[assertion] FAIL: m_valid not asserted 1 cycle after s handshake");
+    else $error("[SVA] FAIL: m_valid not asserted 1 cycle after s handshake");
 
-    //--------------------------------------------------------------------------
-    // m_last follows s_last by 1 cycle -- when a beat with s_last=1
+    //
+    // SVA-4: m_last follows s_last by 1 cycle -- when a beat with s_last=1
     // is accepted, the corresponding output beat must have m_last=1.
-    //--------------------------------------------------------------------------
+    // RATIONALE: Last-signal propagation through the skid buffer pipeline.
+    //
     property p_last_propagation;
         @(posedge clk) disable iff (rst)
         (s_valid && s_ready && s_last) |=> m_last;
     endproperty
     assert property (p_last_propagation)
-    else $error("[assertion] FAIL: m_last did not follow s_last by 1 cycle");
+    else $error("[SVA] FAIL: m_last did not follow s_last by 1 cycle");
 
-    //--------------------------------------------------------------------------
-    // m_last stable during backpressure
+    //
+    // SVA-5: m_last stable during backpressure
     // RATIONALE: Like m_data, m_last must hold until consumed.
-    //--------------------------------------------------------------------------
+    //
     property p_m_last_stable;
         @(posedge clk) disable iff (rst)
         (m_valid && !m_ready) |=> $stable(m_last);
     endproperty
     assert property (p_m_last_stable)
-    else $error("[assertion] FAIL: m_last changed during backpressure");
+    else $error("[SVA] FAIL: m_last changed during backpressure");
 
-    //==========================================================================
+    //
     // Reference Model: Binarization
     // pixel >= 128 -> 1, else -> 0. Implementation: MSB of each byte & keep.
-    //==========================================================================
+    //
     function automatic logic [P_W-1:0] ref_binarize(
         input logic [BUS_WIDTH-1:0] data,
         input logic [P_W-1:0]       keep
@@ -123,14 +128,14 @@ module bnn_input_binarizer_tb;
         return result;
     endfunction
 
-    //==========================================================================
+    //
     // Covergroups
-    //==========================================================================
+    //
 
-    //--------------------------------------------------------------------------
+    //
     // COVERGROUP: Covers pixel threshold boundary (byte 0: <128, =128, >128),
     // s_keep patterns (all, none, partial), s_last, and backpressure states.
-    //--------------------------------------------------------------------------
+    //
     covergroup cg_binarizer @(posedge clk iff (!rst));
         // Cover input pixel values at threshold boundary (first byte)
         cp_pixel_threshold: coverpoint s_data[7:0] iff (s_valid && s_ready) {
@@ -161,7 +166,9 @@ module bnn_input_binarizer_tb;
 
     cg_binarizer cg_inst = new();
 
+    //
     // Scoreboard: Monitor + Expected Queue
+    //
     int pass_count = 0;
     int fail_count = 0;
     string fail_log[$];
@@ -211,7 +218,9 @@ module bnn_input_binarizer_tb;
         end
     end
 
+    //
     // Reset Task
+    //
     task automatic reset_dut();
         rst     <= 1'b1;
         s_valid <= 1'b0;
@@ -224,7 +233,9 @@ module bnn_input_binarizer_tb;
         repeat (3) @(posedge clk);
     endtask
 
+    //
     // Helper: Send one AXI-Stream beat
+    //
     task automatic send_beat(
         input logic [BUS_WIDTH-1:0] data,
         input logic [P_W-1:0]       keep,
@@ -241,11 +252,11 @@ module bnn_input_binarizer_tb;
         s_last  <= 1'b0;
     endtask
 
-    //==========================================================================
+    //
     // Test Scenarios
-    //==========================================================================
+    //
 
-    // Threshold boundary -- pixels at 127, 128, 129
+    //--- Test 1: Threshold boundary -- pixels at 127, 128, 129 ----------------
     task automatic test_threshold_boundary();
         logic [63:0] data;
         $display("[TEST] test_threshold_boundary");
@@ -267,7 +278,7 @@ module bnn_input_binarizer_tb;
         repeat (5) @(posedge clk);
     endtask
 
-    // All zeros -- 64-bit bus all pixels < 128
+    //--- Test 2: All zeros -- 64-bit bus all pixels < 128 ----------------------
     task automatic test_all_zeros();
         $display("[TEST] test_all_zeros");
         m_ready <= 1'b1;
@@ -275,7 +286,7 @@ module bnn_input_binarizer_tb;
         repeat (5) @(posedge clk);
     endtask
 
-    // All ones -- 64-bit bus all pixels >= 128
+    //--- Test 3: All ones -- 64-bit bus all pixels >= 128 ----------------------
     task automatic test_all_ones();
         $display("[TEST] test_all_ones");
         m_ready <= 1'b1;
@@ -283,7 +294,7 @@ module bnn_input_binarizer_tb;
         repeat (5) @(posedge clk);
     endtask
 
-    // Mixed patterns
+    //--- Test 4: Mixed patterns ------------------------------------------------
     task automatic test_mixed_patterns();
         logic [63:0] data;
         $display("[TEST] test_mixed_patterns");
@@ -299,7 +310,7 @@ module bnn_input_binarizer_tb;
         repeat (5) @(posedge clk);
     endtask
 
-    // s_keep patterns -- all valid, none valid, partial
+    //--- Test 5: s_keep patterns -- all valid, none valid, partial ------------
     task automatic test_keep_patterns();
         $display("[TEST] test_keep_patterns");
         m_ready <= 1'b1;
@@ -318,7 +329,7 @@ module bnn_input_binarizer_tb;
         repeat (5) @(posedge clk);
     endtask
 
-    // Backpressure -- m_ready toggling
+    //--- Test 6: Backpressure -- m_ready toggling -----------------------------
     task automatic test_backpressure();
         $display("[TEST] test_backpressure: toggling m_ready");
 
@@ -338,7 +349,7 @@ module bnn_input_binarizer_tb;
         repeat (10) @(posedge clk);
     endtask
 
-    // s_last propagation -- verify 1-cycle delay
+    //--- Test 7: s_last propagation -- verify 1-cycle delay -------------------
     task automatic test_last_propagation();
         $display("[TEST] test_last_propagation");
         m_ready <= 1'b1;
@@ -350,9 +361,9 @@ module bnn_input_binarizer_tb;
         repeat (5) @(posedge clk);
     endtask
 
-    // Random stress -- 200 random beats
+    //--- Test 8: Random stress -- 1000 random beats ---------------------------
     task automatic test_random_stress();
-        int num_beats = 200;
+        int num_beats = RANDOM_BEATS;
         $display("[TEST] test_random_stress: %0d beats", num_beats);
         m_ready <= 1'b1;
 
@@ -371,9 +382,9 @@ module bnn_input_binarizer_tb;
         repeat (10) @(posedge clk);
     endtask
 
-    //==========================================================================
+    //
     // Main Test Sequence
-    //==========================================================================
+    //
     initial begin
         $display("============================================================");
         $display("  bnn_input_binarizer Testbench (CRV, Gray-Box)");
@@ -407,9 +418,9 @@ module bnn_input_binarizer_tb;
 
         repeat (20) @(posedge clk);
 
-        //======================================================================
+        //
         // Scoreboard Summary
-        //======================================================================
+        //
         $display("");
         $display("============================================================");
         $display("  SCOREBOARD SUMMARY -- bnn_input_binarizer");

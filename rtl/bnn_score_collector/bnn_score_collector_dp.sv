@@ -32,10 +32,10 @@ module bnn_score_collector_dp #(
     output logic                      m_last           // = m_valid (1 result per image)
 );
 
-    //  Score bank (register array) 
+    
     logic [ACC_W-1:0] score_bank [0:NUM_NEURONS-1];
 
-    //  Pass counter 
+    
     logic [PASS_W-1:0] pass_cnt_r_q;
     logic [PASS_W-1:0] pass_cnt_next;
 
@@ -50,7 +50,7 @@ module bnn_score_collector_dp #(
             pass_cnt_r_q <= '0;
     end
 
-    //  Score bank write (parallel, s_count entries) 
+    
     // base_idx = pass_cnt_r_q * P_N
     logic [$clog2(NUM_NEURONS > 1 ? NUM_NEURONS : 2)-1:0] base_idx;
     assign base_idx = $clog2(NUM_NEURONS > 1 ? NUM_NEURONS : 2)'(pass_cnt_r_q) *
@@ -74,7 +74,7 @@ module bnn_score_collector_dp #(
         end
     end
 
-    //  Flatten score bank (combinational concatenation) 
+    
     logic [SCORE_W-1:0] flat_scores;
     generate
         genvar j;
@@ -105,7 +105,7 @@ module bnn_score_collector_dp #(
         end
     end
 
-    //  Output score register 
+    
     logic [SCORE_W-1:0] m_scores_r_q;
 
     always_ff @(posedge clk) begin
@@ -116,7 +116,7 @@ module bnn_score_collector_dp #(
             m_scores_r_q <= '0;
     end
 
-    //  M_VALID register 
+    
     logic m_valid_r_q;
 
     always_ff @(posedge clk) begin
@@ -126,7 +126,7 @@ module bnn_score_collector_dp #(
             m_valid_r_q <= 1'b0;
     end
 
-    //  Output assignments 
+    
     assign m_valid  = m_valid_r_q;
     assign m_scores = m_scores_r_q;
     assign m_last   = m_valid_r_q;  // always 1 when valid (one result per image)

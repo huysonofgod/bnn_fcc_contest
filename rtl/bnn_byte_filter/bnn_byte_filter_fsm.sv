@@ -18,7 +18,7 @@ module bnn_byte_filter_fsm (
     output logic in_serialize   // state flag to datapath
 );
 
-    //  State encoding 
+    
     typedef enum logic [0:0] {
         EMPTY     = 1'b0,
         SERIALIZE = 1'b1
@@ -26,7 +26,7 @@ module bnn_byte_filter_fsm (
 
     state_t state_r, next_state;
 
-    //   State register
+    
     always_ff @(posedge clk) begin
         state_r <= next_state;
 
@@ -35,7 +35,7 @@ module bnn_byte_filter_fsm (
             state_r <= EMPTY;
     end
 
-    //  Next state + output logic 
+    
     // Intermediate signals
     logic advance;
     assign advance = (~m_valid) | (m_valid & m_ready);

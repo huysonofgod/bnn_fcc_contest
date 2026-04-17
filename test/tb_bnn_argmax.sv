@@ -12,16 +12,20 @@
 
 module tb_bnn_argmax;
 
-    //Parameters
+    //
+    // Parameters
+    //
     parameter int NUM_CLASSES = `ARGMAX_TB_NUM_CLASSES;
     parameter int ACC_W       = `ARGMAX_TB_ACC_W;
 
     localparam int IDX_W  = $clog2(NUM_CLASSES > 1 ? NUM_CLASSES : 2);
     localparam int STAGES = $clog2(NUM_CLASSES > 1 ? NUM_CLASSES : 2);
-    //Total pipeline depth: 1 (input reg) + STAGES (reduction) + 1 (output reg)
+    // Total pipeline depth: 1 (input reg) + STAGES (reduction) + 1 (output reg)
     localparam int PIPE_DEPTH = STAGES + 2;
 
-    //DUT interface signals
+    //
+    // DUT interface signals
+    //
     logic                          clk = 1'b0;
     logic                          rst = 1'b1;
 
@@ -56,7 +60,7 @@ module tb_bnn_argmax;
     );
 
     //Reference model — golden argmax with first-wins tie-break
-    //    //Given a score vector, computes the expected winning index.
+    //Given a score vector, computes the expected winning index.
     //Tie-break: lowest index wins (first-wins, identical to DUT).
     function automatic logic [IDX_W-1:0] ref_argmax(
         input logic [NUM_CLASSES*ACC_W-1:0] scores
@@ -84,7 +88,7 @@ module tb_bnn_argmax;
     endfunction
 
     //Scoreboard mailboxes and counters
-    //    //The driver pushes expected (idx, last) pairs into exp_mb as it presents
+    //The driver pushes expected (idx, last) pairs into exp_mb as it presents
     //each input beat.  The monitor pops from exp_mb when m_valid&&m_ready and
     //compares.  This gives beat-accurate out-of-order-safe checking under
     //arbitrary backpressure.
@@ -133,8 +137,9 @@ module tb_bnn_argmax;
         end
     end
 
-    //Tie-count
-    covergroup helper (updated by driver before push)
+    //
+    // Tie-count covergroup helper (updated by driver before push)
+    //
     localparam int TIE_MANY_HI = (NUM_CLASSES >= 3) ? NUM_CLASSES : 3;
 
     covergroup cg_tie @(posedge clk iff (s_valid && s_ready));
@@ -192,24 +197,28 @@ module tb_bnn_argmax;
         (m_valid && !m_ready) |=> ($stable(m_idx) && $stable(m_last) && m_valid);
     endproperty
     assert property (p_pipe_stall_stable)
-    else $error("[assertion] output changed while stalled");
+    else $error("[SVA] FAIL a_pipe_stall_stable: output changed while stalled");
 
-    //s_ready must equal pipe_en at all times (DUT architecture property).
-    //pipe_en = ~out_valid_r_q | m_ready.
+    //
+    // SVA-2: s_ready must equal pipe_en at all times (DUT architecture property).
+    // pipe_en = ~out_valid_r_q | m_ready.
+    //
     property p_s_ready_eq_pipe_en;
         @(posedge clk) disable iff (rst)
         s_ready == DUT.pipe_en;
     endproperty
     assert property (p_s_ready_eq_pipe_en)
-    else $error("[assertion] FAIL: s_ready=%0b != pipe_en=%0b", s_ready, DUT.pipe_en);
+    else $error("[SVA] FAIL: s_ready=%0b != pipe_en=%0b", s_ready, DUT.pipe_en);
 
-    //No X on output signals when m_valid is asserted.
+    //
+    // SVA-3: No X on output signals when m_valid is asserted.
+    //
     property p_no_x_when_valid;
         @(posedge clk) disable iff (rst)
         m_valid |-> !$isunknown({m_idx, m_last});
     endproperty
     assert property (p_no_x_when_valid)
-    else $error("[assertion] FAIL: X on output when m_valid=1");
+    else $error("[SVA] FAIL: X on output when m_valid=1");
 
     //Reset task
     task automatic reset_dut(int cycles = 10);
@@ -224,7 +233,7 @@ module tb_bnn_argmax;
     endtask
 
     //Driver: send one score vector, return when handshake completes
-    //    //Pushes expected result into exp_q only after the input handshake occurs.
+    //Pushes expected result into exp_q only after the input handshake occurs.
     //Under output backpressure, older results can still drain while a new
     //input is waiting for s_ready, so pre-queuing would misalign the monitor.
     task automatic send_beat(
@@ -235,12 +244,12 @@ module tb_bnn_argmax;
         int        tie_cnt;
         logic [ACC_W-1:0] max_sc;
 
-        //Compute reference index and tie count for scoreboard / coverage
+        // Compute reference index and tie count for scoreboard / coverage
         e.idx    = ref_argmax(scores);
         e.last   = last;
         e.scores = scores;
 
-        //Count ties at max score
+        // Count ties at max score
         max_sc  = scores[e.idx * ACC_W +: ACC_W];
         tie_cnt = 0;
         for (int k = 0; k < NUM_CLASSES; k++) begin
@@ -249,13 +258,13 @@ module tb_bnn_argmax;
         end
         tie_count_last = tie_cnt;
 
-        //Present to DUT and wait for handshake
+        // Present to DUT and wait for handshake
         @(posedge clk);
         s_valid  <= 1'b1;
         s_scores <= scores;
         s_last   <= last;
 
-        //Hold until an actual handshake cycle occurs.
+        // Hold until an actual handshake cycle occurs.
         do @(posedge clk); while (!s_ready);
 
         exp_q.push_back(e);
@@ -302,47 +311,55 @@ module tb_bnn_argmax;
         return s;
     endfunction
 
-    //�� All-zero scores: tie at 0 → first-wins → idx 0
+    //
+    // T01 — All-zero scores: tie at 0 → first-wins → idx 0
+    //
     task automatic test_t01_all_zero();
-        $display("[test] all-zero → expect idx 0");
+        $display("[TEST] T01: all-zero → expect idx 0");
         reset_dut();
         m_ready <= 1'b1;
         send_beat(all_equal(0), 1'b1);
         drain_all();
     endtask
 
-    //�� Ascending scores: max at last class
+    //
+    // T02 — Ascending scores: max at last class
+    //
     task automatic test_t02_ascending();
-        $display("[test] ascending → expect idx %0d", NUM_CLASSES-1);
+        $display("[TEST] T02: ascending → expect idx %0d", NUM_CLASSES-1);
         reset_dut();
         m_ready <= 1'b1;
         send_beat(ascending(), 1'b1);
         drain_all();
     endtask
 
-    //�� Descending scores: max at class 0
+    //
+    // T03 — Descending scores: max at class 0
+    //
     task automatic test_t03_descending();
-        $display("[test] descending → expect idx 0");
+        $display("[TEST] T03: descending → expect idx 0");
         reset_dut();
         m_ready <= 1'b1;
         send_beat(descending(), 1'b1);
         drain_all();
     endtask
 
-    //�� Tie at two indices: first-wins gives lower index
-    //(skipped if NUM_CLASSES < 8)
+    //
+    // T04 — Tie at two indices: first-wins gives lower index
+    // (skipped if NUM_CLASSES < 8)
+    //
     task automatic test_t04_tie_lower_wins();
         logic [NUM_CLASSES*ACC_W-1:0] s;
         int tie_lo, tie_hi;
-        $display("[test] tie at idx 3 and 7 → expect idx 3");
+        $display("[TEST] T04: tie at idx 3 and 7 → expect idx 3");
         if (NUM_CLASSES < 8) begin
-            $display("[test] SKIPPED — NUM_CLASSES=%0d < 8", NUM_CLASSES);
+            $display("[T04] SKIPPED — NUM_CLASSES=%0d < 8", NUM_CLASSES);
             pass_count++;
             return;
         end
         reset_dut();
         m_ready <= 1'b1;
-        //Build: all zeros except index 3 and 7 share the maximum score
+        // Build: all zeros except index 3 and 7 share the maximum score
         s = '0;
         tie_lo = 3; tie_hi = 7;
         for (int k = 0; k < NUM_CLASSES; k++)
@@ -351,24 +368,28 @@ module tb_bnn_argmax;
         drain_all();
     endtask
 
-    //�� All-equal at maximum value: first-wins → idx 0
+    //
+    // T05 — All-equal at maximum value: first-wins → idx 0
+    //
     task automatic test_t05_all_equal_max();
-        $display("[test] all-equal at max → expect idx 0");
+        $display("[TEST] T05: all-equal at max → expect idx 0");
         reset_dut();
         m_ready <= 1'b1;
         send_beat(all_equal((1 << ACC_W) - 1), 1'b1);
         drain_all();
     endtask
 
-    //�� Back-to-back valid beats with m_ready=1: pipeline saturates
+    //
+    // T06 — Back-to-back valid beats with m_ready=1: pipeline saturates
+    //
     task automatic test_t06_back_to_back();
         int n = PIPE_DEPTH * 3;
-        $display("[test] %0d back-to-back beats, m_ready=1", n);
+        $display("[TEST] T06: %0d back-to-back beats, m_ready=1", n);
         reset_dut();
         m_ready <= 1'b1;
         for (int i = 0; i < n; i++) begin
             logic [NUM_CLASSES*ACC_W-1:0] s;
-            //Vary the winning index to exercise all classes
+            // Vary the winning index to exercise all classes
             s = '0;
             s[((i % NUM_CLASSES) * ACC_W) +: ACC_W] = ACC_W'((1 << ACC_W) - 1);
             send_beat(s, (i == n-1));
@@ -376,14 +397,16 @@ module tb_bnn_argmax;
         drain_all();
     endtask
 
-    //�� Random m_ready toggling (50% probability): stall propagation
+    //
+    // T07 — Random m_ready toggling (50% probability): stall propagation
+    //
     task automatic test_t07_random_ready();
         int n = 256;
-        $display("[test] %0d beats with random m_ready (50%%)", n);
+        $display("[TEST] T07: %0d beats with random m_ready (50%%)", n);
         reset_dut();
 
         fork
-            //Input driver
+            // Input driver
             begin
                 for (int i = 0; i < n; i++) begin
                     logic [NUM_CLASSES*ACC_W-1:0] s;
@@ -391,7 +414,7 @@ module tb_bnn_argmax;
                     send_beat(s, (i == n-1));
                 end
             end
-            //Async ready toggler
+            // Async ready toggler
             begin : ready_toggler
                 for (int cyc = 0; cyc < n * (PIPE_DEPTH + 5); cyc++) begin
                     @(posedge clk);
@@ -404,14 +427,16 @@ module tb_bnn_argmax;
         drain_all();
     endtask
 
-    //�� m_ready held low then released: bubbles drain in order
+    //
+    // T08 — m_ready held low then released: bubbles drain in order
+    //
     task automatic test_t08_held_low_then_release();
         int hold_cyc = PIPE_DEPTH * 2;
-        $display("[test] m_ready held low %0d cycles then released", hold_cyc);
+        $display("[TEST] T08: m_ready held low %0d cycles then released", hold_cyc);
         reset_dut();
         m_ready <= 1'b0;
 
-        //Send a few beats while ready is low
+        // Send a few beats while ready is low
         fork
             begin
                 for (int i = 0; i < 3; i++) begin
@@ -420,7 +445,7 @@ module tb_bnn_argmax;
                 end
             end
             begin : hold_low
-                //Let them accumulate in the pipeline
+                // Let them accumulate in the pipeline
                 repeat (hold_cyc) @(posedge clk);
                 m_ready <= 1'b1;
             end
@@ -429,13 +454,15 @@ module tb_bnn_argmax;
         drain_all(2000);
     endtask
 
-    //�� s_last tracking through pipeline
+    //
+    // T09 — s_last tracking through pipeline
+    //
     task automatic test_t09_last_tracking();
-        $display("[test] s_last passthrough");
+        $display("[TEST] T09: s_last passthrough");
         reset_dut();
         m_ready <= 1'b1;
 
-        //Alternate last=0 and last=1 beats
+        // Alternate last=0 and last=1 beats
         for (int i = 0; i < 6; i++) begin
             logic [NUM_CLASSES*ACC_W-1:0] s = rand_scores();
             send_beat(s, (i % 2 == 1));
@@ -443,13 +470,15 @@ module tb_bnn_argmax;
         drain_all();
     endtask
 
-    //�� Reset mid-pipeline: next beat clean after reset
+    //
+    // T10 — Reset mid-pipeline: next beat clean after reset
+    //
     task automatic test_t10_reset_mid_pipe();
-        $display("[test] Reset mid-pipeline");
+        $display("[TEST] T10: Reset mid-pipeline");
         reset_dut();
         m_ready <= 1'b1;
 
-        //Send a beat, then reset before it drains
+        // Send a beat, then reset before it drains
         @(posedge clk);
         s_valid  <= 1'b1;
         s_scores <= ascending();
@@ -457,41 +486,44 @@ module tb_bnn_argmax;
         @(posedge clk);
         s_valid  <= 1'b0;
 
-        //Partial pipeline fill — then reset
+        // Partial pipeline fill — then reset
         repeat (STAGES / 2 + 1) @(posedge clk);
         exp_q.delete();   // discard old expectations (reset invalidates them)
         reset_dut();
 
-        //Verify no stale output appears after reset
+        // Verify no stale output appears after reset
         repeat (PIPE_DEPTH + 5) @(posedge clk);
         check("T10_no_stale_valid", m_valid == 1'b0,
               $sformatf("m_valid=%0b expected 0 after reset", m_valid));
 
-        //Send a fresh beat and verify it works correctly
+        // Send a fresh beat and verify it works correctly
         send_beat(descending(), 1'b1);
         drain_all();
     endtask
 
-    //�� Random scoreboard run: 10000 beats, mixed backpressure
-    //    //Generator creates fully-random score vectors. The reference model
-    //computes expected idx. The scoreboard verifies every output beat.
+    //
+    // T12 — Random scoreboard run: 10000 beats, mixed backpressure
+    //
+    // Generator creates fully-random score vectors. The reference model
+    // computes expected idx. The scoreboard verifies every output beat.
+    //
     task automatic test_t12_random_stress();
         int n = `ARGMAX_TB_RANDOM_BEATS;
-        $display("[test] Random scoreboard run %0d beats", n);
+        $display("[TEST] T12: Random scoreboard run %0d beats", n);
         reset_dut();
 
         fork
-            //Input driver with random valid gaps
+            // Input driver with random valid gaps
             begin
                 for (int i = 0; i < n; i++) begin
-                    //Occasionally add idle cycles between beats
+                    // Occasionally add idle cycles between beats
                     if ($urandom_range(0, 3) == 0) begin
                         @(posedge clk); s_valid <= 1'b0;
                     end
                     send_beat(rand_scores(), (i == n-1));
                 end
             end
-            //Random m_ready
+            // Random m_ready
             begin : ready_rand
                 forever begin
                     @(posedge clk);
@@ -503,7 +535,9 @@ module tb_bnn_argmax;
         drain_all(n * (PIPE_DEPTH + 2) + 1000);
     endtask
 
-    //Main test sequence
+    //
+    // Main test sequence
+    //
     initial begin
         $display("=====================================================");
         $display(" tb_bnn_argmax — Level-1 CRV-lite");

@@ -1,32 +1,40 @@
-`timescale 1ns/1ps
+`timescale 1ns/100ps
 
 module bnn_fanout_buf_tb;
 
-    //==========================================================================
+    //
     // Parameters
-    //==========================================================================
+    //
     parameter int WIDTH = 8;
 
+    //
     // DUT Interface Signals — PIPE_STAGES=0
+    //
     logic             clk = 0;
     logic             rst = 1;
     logic [WIDTH-1:0] d0;
     logic [WIDTH-1:0] q0;
 
+    //
     // DUT Interface Signals — PIPE_STAGES=1
+    //
     logic [WIDTH-1:0] d1;
     logic [WIDTH-1:0] q1;
 
+    //
     // DUT Interface Signals — PIPE_STAGES=2
+    //
     logic [WIDTH-1:0] d2;
     logic [WIDTH-1:0] q2;
 
-    //==========================================================================
+    //
     // Clock Generation (100 MHz)
-    //==========================================================================
+    //
     always #5 clk = ~clk;
 
+    //
     // DUT Instantiation — PIPE_STAGES=0 (passthrough)
+    //
     bnn_fanout_buf #(
         .WIDTH       (WIDTH),
         .PIPE_STAGES (0)
@@ -37,7 +45,9 @@ module bnn_fanout_buf_tb;
         .q   (q0)
     );
 
+    //
     // DUT Instantiation — PIPE_STAGES=1 (1-cycle registered)
+    //
     bnn_fanout_buf #(
         .WIDTH       (WIDTH),
         .PIPE_STAGES (1)
@@ -48,7 +58,9 @@ module bnn_fanout_buf_tb;
         .q   (q1)
     );
 
+    //
     // DUT Instantiation — PIPE_STAGES=2 (2-cycle pipeline)
+    //
     bnn_fanout_buf #(
         .WIDTH       (WIDTH),
         .PIPE_STAGES (2)
@@ -59,20 +71,25 @@ module bnn_fanout_buf_tb;
         .q   (q2)
     );
 
+    //
     // Transaction Type Definition
+    //
     typedef struct {
         logic [WIDTH-1:0] data;       // Stimulus driven to d
         logic [WIDTH-1:0] expected;   // Expected value at q
         int               pipe_id;    // Which DUT: 0, 1, or 2
     } trans_t;
 
+    //
     // Communication Channels (Mailboxes)
+    //
     mailbox #(trans_t) gen2drv = new();
     mailbox #(trans_t) drv2sb  = new();
     mailbox #(trans_t) mon2sb  = new();
 
-    
+    //
     // Functional Coverage
+    //
     logic [WIDTH-1:0] cov_d0, cov_q0;
     logic [WIDTH-1:0] cov_d1, cov_q1;
     logic [WIDTH-1:0] cov_d2, cov_q2;
@@ -114,13 +131,17 @@ module bnn_fanout_buf_tb;
     endgroup
     cg_functional cg_inst = new();
 
+    //
     // Test Counters
+    //
     int pass_count = 0;
     int fail_count = 0;
     int test_count = 0;
     int directed_tests_done = 0;
 
+    //
     // Reset Task (Timing Rule 3: NBA at posedge)
+    //
     task automatic reset_dut();
         rst <= 1'b1;
         d0  <= '0;
@@ -131,7 +152,9 @@ module bnn_fanout_buf_tb;
         repeat (5) @(posedge clk);
     endtask
 
-    // Helper: Check and report
+    //
+    // Assertion Helper: Check and report
+    //
     task automatic check(string test_name, logic [WIDTH-1:0] expected, logic [WIDTH-1:0] actual);
         test_count++;
         if (actual === expected) begin
@@ -142,7 +165,10 @@ module bnn_fanout_buf_tb;
         end
     endtask
 
+    //
+    // DT1: passthrough_zero_stages
     // PIPE_STAGES=0: output equals input same cycle (combinational)
+    //
     task automatic test_dt1_passthrough();
         logic [WIDTH-1:0] val;
         $display("[DT1] passthrough_zero_stages — start");
@@ -161,8 +187,10 @@ module bnn_fanout_buf_tb;
         $display("[DT1] passthrough_zero_stages — done");
     endtask
 
-    
+    //
+    // DT2: one_stage_delay
     // PIPE_STAGES=1: output equals input 1 cycle later
+    //
     task automatic test_dt2_one_stage();
         logic [WIDTH-1:0] val;
         logic [WIDTH-1:0] prev_val;
@@ -185,12 +213,15 @@ module bnn_fanout_buf_tb;
         $display("[DT2] one_stage_delay — done");
     endtask
 
+    //
+    // DT3: two_stage_delay
     // PIPE_STAGES=2. TB rhythm is `@; drive; @; check` (one drive per iter).
     // At check time the DUT has shifted exactly once since this iter's drive
     // (DUT's NBA for the drive edge fires BEFORE the check-edge Active region,
     //  but the check-edge NBA has not yet completed the second shift), so q2
     // holds the value driven in the PREVIOUS iteration. This matches DT2's
     // scalar pattern; a 2-entry FIFO would mis-model the timing.
+    //
     task automatic test_dt3_two_stage();
         logic [WIDTH-1:0] val;
         logic [WIDTH-1:0] prev_val;
@@ -218,9 +249,11 @@ module bnn_fanout_buf_tb;
         $display("[DT3] two_stage_delay — done");
     endtask
 
-    
+    //
+    // DT4: alignment_preserved
     // Drive random pattern through all three DUTs simultaneously,
     // verify each DUT's output matches input delayed by its PIPE_STAGES.
+    //
     task automatic test_dt4_alignment();
         localparam int NUM_BEATS = 20;
         logic [WIDTH-1:0] input_stream [NUM_BEATS];
@@ -268,8 +301,11 @@ module bnn_fanout_buf_tb;
         $display("[DT4] alignment_preserved — done");
     endtask
 
+    //
+    // DT5: reset_mid_pipe
     // Assert reset while pipeline stages hold data; verify all stages
     // clear to 0 and pipeline resumes correctly after deassertion.
+    //
     task automatic test_dt5_reset_mid_pipe();
         logic [WIDTH-1:0] val;
         $display("[DT5] reset_mid_pipe — start");
@@ -314,9 +350,11 @@ module bnn_fanout_buf_tb;
         $display("[DT5] reset_mid_pipe — done");
     endtask
 
+    //
     // DT6: burst_then_idle
     // 10 cycles of driven data, then idle (hold d constant). Verify the
     // pipeline drains correctly for PIPE_STAGES=1 and PIPE_STAGES=2.
+    //
     task automatic test_dt6_burst_then_idle();
         localparam int BURST_LEN = 10;
         logic [WIDTH-1:0] burst_data [BURST_LEN];
@@ -352,10 +390,13 @@ module bnn_fanout_buf_tb;
         $display("[DT6] burst_then_idle — done");
     endtask
 
+    //
     // Random Stress (single-thread, mirrors DT2 timing)
+    //
     // Drives 200 random values into DUT1 (PIPE_STAGES=1) with the same
     // `@; drive; @; check` rhythm as DT2. At check time q1 holds the
     // previously driven value, so the scoreboard tracks `prev_val`.
+    //
     localparam int NUM_RANDOM_TX = 200;
     int random_done = 0;
 
@@ -386,11 +427,13 @@ module bnn_fanout_buf_tb;
         random_done = 1;
     end
 
-    
+    //
+    // SVA Properties (Gray Box — White Box Layer)
+    //
     // Registered reset-delay shifts so alignment SVAs skip the 1-cycle (pipe1)
     // or 2-cycle (pipe2) transient where stage regs were just force-cleared
     // but $past(d) still samples pre-reset d.
- 
+    //
     // 4-deep rst shift covers all alignment transients: during reset stage
     // regs are forced to 0, but $past(d) still samples pre-reset d for up to
     // `PIPE_STAGES` cycles after deassert. 4 is a safe blanket for PIPE_STAGES=2.
@@ -400,21 +443,21 @@ module bnn_fanout_buf_tb;
     end
     wire rst_recent = rst || |rst_shift_q;
 
-    // After reset deasserts, PIPE_STAGES=1 output must be 0 for at least 1 cycle
+    // A1: After reset deasserts, PIPE_STAGES=1 output must be 0 for at least 1 cycle
     property p_pipe1_reset_clears;
         @(posedge clk) $fell(rst) |-> (q1 == '0);
     endproperty
     a_pipe1_reset_clears: assert property (p_pipe1_reset_clears)
         else $error("SVA: DUT1 output not cleared after reset");
 
-    // After reset deasserts, PIPE_STAGES=2 output must be 0 for at least 1 cycle
+    // A2: After reset deasserts, PIPE_STAGES=2 output must be 0 for at least 1 cycle
     property p_pipe2_reset_clears;
         @(posedge clk) $fell(rst) |-> (q2 == '0);
     endproperty
     a_pipe2_reset_clears: assert property (p_pipe2_reset_clears)
         else $error("SVA: DUT2 output not cleared after reset");
 
-    // PIPE_STAGES=0 output always equals input (combinational passthrough)
+    // A3: PIPE_STAGES=0 output always equals input (combinational passthrough)
     property p_pipe0_passthrough;
         @(posedge clk) disable iff (rst)
             (q0 == d0);
@@ -422,7 +465,7 @@ module bnn_fanout_buf_tb;
     a_pipe0_passthrough: assert property (p_pipe0_passthrough)
         else $error("SVA: DUT0 passthrough violated: d0=%0h q0=%0h", d0, q0);
 
-    // PIPE_STAGES=1 output equals prior-cycle input (data alignment).
+    // A4: PIPE_STAGES=1 output equals prior-cycle input (data alignment).
     // Disabled for 1 cycle after rst deasserts so the reset-cleared q1 isn't
     // compared against pre-reset $past(d1).
     property p_pipe1_data_alignment;
@@ -432,7 +475,7 @@ module bnn_fanout_buf_tb;
     a_pipe1_data_alignment: assert property (p_pipe1_data_alignment)
         else $error("SVA: DUT1 alignment violated: q1=%0h, past(d1)=%0h", q1, $past(d1,1));
 
-    // PIPE_STAGES=2 output equals 2-cycles-ago input (data alignment).
+    // A5: PIPE_STAGES=2 output equals 2-cycles-ago input (data alignment).
     // Disabled for 2 cycles after rst deasserts.
     property p_pipe2_data_alignment;
         @(posedge clk) disable iff (rst_recent)
@@ -441,9 +484,9 @@ module bnn_fanout_buf_tb;
     a_pipe2_data_alignment: assert property (p_pipe2_data_alignment)
         else $error("SVA: DUT2 alignment violated: q2=%0h, past(d2,2)=%0h", q2, $past(d2,2));
 
-    //==========================================================================
+    //
     // Main Test Sequence
-    //==========================================================================
+    //
     initial begin
         $display("============================================");
         $display("  bnn_fanout_buf Testbench (CRV)");

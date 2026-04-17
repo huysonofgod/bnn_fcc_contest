@@ -15,30 +15,30 @@ module bnn_layer_engine #(
     input  logic                          clk,
     input  logic                          rst,
 
-    // Per-image control
+    
     input  logic                          start,
     output logic                          busy,
     output logic                          done,
 
-    //  Compute stream in (binary words from prev layer / binarizer) 
+    
     input  logic                          s_valid,
     output logic                          s_ready,
     input  logic [P_W-1:0]                s_data,
     input  logic                          s_last,
 
-    //  Hidden-layer downstream (packed binary; IS_OUTPUT_LAYER=0) 
+    
     output logic                          m_valid,
     input  logic                          m_ready,
     output logic [NEXT_P_W-1:0]           m_data,
     output logic                          m_last,
 
-    //  Output-layer downstream (raw scores; IS_OUTPUT_LAYER=1) 
+    
     output logic                          score_valid,
     input  logic                          score_ready,
     output logic [NUM_NEURONS*ACC_W-1:0]  score_data,
     output logic                          score_last,
 
-    //  Configuration write port (weight RAMs) 
+    
     input  logic                          cfg_wr_valid,
     output logic                          cfg_wr_ready,
     input  logic [LID_W-1:0]              cfg_wr_layer,
@@ -46,7 +46,7 @@ module bnn_layer_engine #(
     input  logic [15:0]                   cfg_wr_addr,
     input  logic [P_W-1:0]                cfg_wr_data,
 
-    // ─── Configuration write port (threshold RAMs) ─────────────────────
+    
     input  logic                          cfg_thr_valid,
     output logic                          cfg_thr_ready,
     input  logic [LID_W-1:0]              cfg_thr_layer,
@@ -55,6 +55,9 @@ module bnn_layer_engine #(
     input  logic [31:0]                   cfg_thr_data
 );
 
+    // =========================================================================
+    // Localparams — must match bnn_seq_addr_gen formulas
+    // =========================================================================
     localparam int ITERS           = (FAN_IN + P_W - 1) / P_W;
     localparam int PASSES          = (NUM_NEURONS + P_N - 1) / P_N;
     localparam int WT_DEPTH        = ITERS * PASSES;
@@ -72,7 +75,9 @@ module bnn_layer_engine #(
     assign cfg_wr_ready  = 1'b1;
     assign cfg_thr_ready = 1'b1;
 
-
+    // =========================================================================
+    // M2 front-end FIFO + per-image replay stage
+    // =========================================================================
     logic            buf_src_valid;
     logic            buf_src_ready;
     logic [P_W-1:0]  buf_src_data;
@@ -121,6 +126,9 @@ module bnn_layer_engine #(
         .out_last       (buf_last)
     );
 
+    // =========================================================================
+    // bnn_layer_ctrl (pure FSM) + bnn_seq_addr_gen (counters/addr regs)
+    // =========================================================================
     logic                    np_valid_in;
     logic                    np_last;
     logic                    wt_rd_en;
@@ -164,7 +172,11 @@ module bnn_layer_engine #(
         .NUM_NEURONS     (NUM_NEURONS),
         .FAN_IN          (FAN_IN),
         .IS_OUTPUT_LAYER (IS_OUTPUT_LAYER),
-        .RESULT_WAIT_CYCLES(FANOUT_STAGES)
+        // RESULT_WAIT_CYCLES accounts for both the optional NP-bank fanout
+        // pipe and the fixed one-cycle final-score/threshold compare stage in
+        // NP_datapath. Without the extra cycle, M4/M5 can sample the previous
+        // pass result after the final-beat compute path is pipelined.
+        .RESULT_WAIT_CYCLES(FANOUT_STAGES + 1)
     ) u_ctrl (
         .clk          (clk),
         .rst          (rst),
@@ -214,7 +226,9 @@ module bnn_layer_engine #(
         .last_pass      (last_pass)
     );
 
+    // =========================================================================
     // Per-NP write-enable decode
+    // =========================================================================
     logic                layer_match_wr;
     logic                layer_match_thr;
     logic [P_N-1:0]      wt_we;
@@ -231,7 +245,9 @@ module bnn_layer_engine #(
         end
     endgenerate
 
+    // =========================================================================
     // Per-NP Weight RAMs + Threshold RAMs
+    // =========================================================================
     logic [P_N*P_W-1:0]       w_flat;
     logic [P_N*ACC_W-1:0]     thr_flat;
 
@@ -282,7 +298,9 @@ module bnn_layer_engine #(
         end
     endgenerate
 
+    // =========================================================================
     // bnn_np_bank (fan-out + P_N × neuron_processor)
+    // =========================================================================
     logic [P_N-1:0]          y_concat;
     logic [P_N*ACC_W-1:0]    score_concat;
     logic                    np_valid_out;
@@ -307,7 +325,9 @@ module bnn_layer_engine #(
         .np_valid_out          (np_valid_out)
     );
 
-    //  (hidden) or  (output)
+    // =========================================================================
+    // M4 (hidden) or M5 (output)
+    // =========================================================================
     generate
         if (IS_OUTPUT_LAYER == 1'b0) begin : g_hidden
             bnn_activation_packer #(
