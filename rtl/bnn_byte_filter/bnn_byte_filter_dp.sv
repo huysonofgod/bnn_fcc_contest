@@ -1,3 +1,5 @@
+`timescale 1ns/10ps
+
 module bnn_byte_filter_dp #(
     parameter int BUS_WIDTH = 64
 )(
@@ -23,7 +25,7 @@ module bnn_byte_filter_dp #(
 );
 
     localparam int NUM_BYTES = BUS_WIDTH / 8;  // 8
-    localparam int IDX_W     = $clog2(NUM_BYTES);  // 3
+    localparam int IDX_W     = (NUM_BYTES > 1) ? $clog2(NUM_BYTES) : 1;
 
     //  Capture registers 
     logic [BUS_WIDTH-1:0]    data_r_q;
@@ -87,8 +89,8 @@ module bnn_byte_filter_dp #(
 
     // m_valid: combinational (keep_bit gated by serialize state)
     assign m_valid = keep_bit & in_serialize;
-    // m_last: combinational (only when we're at the last valid byte of a last word)
-    assign m_last  = last_r_q & at_last_valid & in_serialize;
+    // m_last: combinational (only on an emitted valid byte that is the last valid lane)
+    assign m_last  = last_r_q & at_last_valid & in_serialize & keep_bit;
     assign m_data  = m_data_comb;
 
 endmodule

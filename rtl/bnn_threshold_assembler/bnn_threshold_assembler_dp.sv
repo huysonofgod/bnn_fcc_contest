@@ -1,3 +1,5 @@
+`timescale 1ns/10ps
+
 module bnn_threshold_assembler_dp (
     input  logic       clk,
     input  logic       rst,

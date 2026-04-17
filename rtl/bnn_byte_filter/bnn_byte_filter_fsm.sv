@@ -1,3 +1,5 @@
+`timescale 1ns/10ps
+
 module bnn_byte_filter_fsm (
     input  logic clk,
     input  logic rst,

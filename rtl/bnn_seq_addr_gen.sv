@@ -17,7 +17,8 @@ module bnn_seq_addr_gen #(
     input  logic                   clk,
     input  logic                   rst,
 
-    // Strobes from bnn_layer_ctrl (FSM)
+    // Strobes from
+    // bnn_layer_ctrl (FSM)
     input  logic                   iter_we,
     input  logic                   iter_clr,
     input  logic                   pass_we,
@@ -26,7 +27,8 @@ module bnn_seq_addr_gen #(
     input  logic                   thr_addr_we,
     input  logic                   vnp_we,
 
-    // Status back to bnn_layer_ctrl (FSM)
+    // Status back to
+    // bnn_layer_ctrl (FSM)
     output logic                   iter_tc,
     output logic                   pass_tc,
 

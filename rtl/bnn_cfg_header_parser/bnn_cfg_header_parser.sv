@@ -1,3 +1,5 @@
+`timescale 1ns/10ps
+
 module bnn_cfg_header_parser (
     input  logic       clk,
     input  logic       rst,

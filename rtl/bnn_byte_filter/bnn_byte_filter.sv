@@ -1,3 +1,5 @@
+`timescale 1ns/10ps
+
 module bnn_byte_filter #(
     parameter int BUS_WIDTH = 64
 )(

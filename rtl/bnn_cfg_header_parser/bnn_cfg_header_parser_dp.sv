@@ -1,3 +1,5 @@
+`timescale 1ns/10ps
+
 module bnn_cfg_header_parser_dp (
     input  logic       clk,
     input  logic       rst,
@@ -75,7 +77,7 @@ module bnn_cfg_header_parser_dp (
     assign hdr_bytes_per_neuron = hdr_sr_view[63:48];
     assign hdr_total_bytes      = hdr_sr_view[95:64];
 
-    // Total-bytes latch and payload byte counter
+    // Total bytes latch and payload byte counter
     logic [31:0] total_bytes_r_q;
 
     always_ff @(posedge clk) begin
