@@ -126,10 +126,10 @@ module bnn_cfg_header_parser_fsm (
                         if (saw_last_r_q || byte_last) begin
                             next_state = IDLE;
                         end else begin
-                            // More messages follow in this stream
-                            hdr_byte_we  = 1'b1;
-                            hdr_byte_clr = 1'b1;
-                            next_state   = PARSE_HEADER;
+                            // More messages follow in this stream. Return
+                            // through IDLE so header-counter clear is not
+                            // driven directly from the payload_done cone.
+                            next_state = IDLE;
                         end
                     end
                     // else: stay in ROUTE_PAYLOAD

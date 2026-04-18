@@ -56,11 +56,9 @@ always_comb begin
                     //TODO: remove dbg_neuron_done once verified correct
                     dbg_neuron_done = 1'b1;
 
-                    // Single-beat neuron: capture outputs immediately, clear next cycle.
-                    activation_r_we = 1'b1;
-                    out_score_r_we  = 1'b1;
-                    valid_out_we    = 1'b1;
-                    state_next      = RESET;
+                    // Single-beat neuron: accumulate this beat, then publish
+                    // from the registered accumulator in RESET.
+                    state_next = RESET;
                 end else begin
                     state_next = COMPUTE;
                 end
@@ -78,22 +76,21 @@ always_comb begin
                     //TODO: remove dbg_neuron_done once verified correct
                     dbg_neuron_done = 1'b1;
 
-                    // accept final beat of this neuron
-                    activation_r_we = 1'b1;
-                    out_score_r_we  = 1'b1;
-                    valid_out_we    = 1'b1;
-                    state_next      = RESET;
+                    // Accept final beat of this neuron, then publish from the
+                    // registered accumulator in RESET.
+                    state_next = RESET;
                 end
             end
         end
 
         RESET: begin
-            // One-cycle clear between neurons.
-            acc_we     = 1'b1;
-            acc_sel    = 1'b1;
-            // Commenting out the following line to fix the bug where activation_r_we is incorrectly asserted during RESET
-            // activation_r_we = 1'b1;
-            state_next = IDLE;
+            // One-cycle output capture and clear between neurons.
+            acc_we          = 1'b1;
+            acc_sel         = 1'b1;
+            activation_r_we = 1'b1;
+            out_score_r_we  = 1'b1;
+            valid_out_we    = 1'b1;
+            state_next      = IDLE;
         end
 
         default: begin

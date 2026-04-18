@@ -185,25 +185,27 @@ module bnn_unpack_datapath #(
     end
 
     
-    logic [15:0] neuron_byte_rem_r_q;
-    logic [15:0] neuron_byte_rem_dec_w;
-    logic [15:0] neuron_byte_rem_next;
+    // neuron_byte_rem_r_q: bounded to BPN_BITS so comparators and path from
+    // bit[14+] (present in 16-bit version) no longer appear in M10 timing paths.
+    // For STATIC_BPN=98 → 7 bits; STATIC_BPN=32 → 6 bits.
+    localparam int BPN_BITS = (STATIC_BYTES_PER_NEURON > 0)
+                              ? $clog2(STATIC_BYTES_PER_NEURON + 1) : 16;
+    (* max_fanout = 2 *) logic [BPN_BITS-1:0] neuron_byte_rem_r_q;
+    logic [BPN_BITS-1:0] neuron_byte_rem_dec_w;
+    logic [BPN_BITS-1:0] neuron_byte_rem_next;
 
-    // The original implementation compared an up-counter against bpn_r_q and
-    // bpn_r_q-1 every cycle. At 1 ns, that placed a registered config field on
-    // the M10 FSM/counter-clear critical path. A down-counter loads BPN only at
-    // message/neuron boundaries; steady-state control now checks rem==1/rem==0.
-    assign neuron_bytes_done     = (neuron_byte_rem_r_q == 16'd1);
-    assign neuron_bytes_complete = (neuron_byte_rem_r_q == 16'd0);
-    assign neuron_byte_rem_dec_w = (neuron_byte_rem_r_q != 16'd0)
-                                 ? (neuron_byte_rem_r_q - 16'd1)
-                                 : 16'd0;
+    // Down-counter: steady-state control checks rem==1/rem==0 (no bpn compare).
+    assign neuron_bytes_done     = (neuron_byte_rem_r_q == BPN_BITS'(1));
+    assign neuron_bytes_complete = (neuron_byte_rem_r_q == '0);
+    assign neuron_byte_rem_dec_w = (neuron_byte_rem_r_q != '0)
+                                 ? (neuron_byte_rem_r_q - BPN_BITS'(1))
+                                 : '0;
 
     always_comb begin
         if (cfg_we)
-            neuron_byte_rem_next = bpn_load;
+            neuron_byte_rem_next = BPN_BITS'(bpn_load);
         else if (neur_byte_we && neur_byte_clr)
-            neuron_byte_rem_next = bpn_r_q;
+            neuron_byte_rem_next = BPN_BITS'(bpn_r_q);
         else if (neur_byte_we)
             neuron_byte_rem_next = neuron_byte_rem_dec_w;
         else
@@ -219,31 +221,33 @@ module bnn_unpack_datapath #(
 
     
     logic [15:0] neuron_idx_r_q;
-    logic [15:0] word_rem_r_q;
     logic [15:0] neuron_idx_next;
-    logic [15:0] word_rem_dec_w;
-    logic [15:0] word_rem_next;
 
     // word_idx: bounded up-counter for address (0..WPN-1). With STATIC_WORDS_PER_NEURON
     // Vivado bounds the counter to WPN_BITS wide, shortening the address adder carry chain.
     localparam int WPN_BITS = (STATIC_WORDS_PER_NEURON > 0)
                               ? $clog2(STATIC_WORDS_PER_NEURON + 1) : 16;
     logic [WPN_BITS-1:0] word_idx_r_q;
+    // word_rem_r_q: same WPN_BITS bound as word_idx so the MSBs above WPN_BITS-1
+    // are absent. This eliminates word_rem_r_q[8] (which was on the M10 critical
+    // path to neuron_byte_rem_r_q/R) when STATIC_WORDS_PER_NEURON <= 127.
+    logic [WPN_BITS-1:0] word_rem_r_q;
+    logic [WPN_BITS-1:0] word_rem_dec_w;
+    logic [WPN_BITS-1:0] word_rem_next;
 
     assign last_neuron = (nneur_r_q != 16'd0) &&
                          (neuron_idx_r_q == (nneur_r_q - 16'd1));
-    // word_rem_r_q down-counter: loaded from wpn at cfg/neuron boundary, decrements
-    // each word. last_word fires when rem==1 (no wpn_r_q-1 compare or reset fanout).
-    assign last_word   = (word_rem_r_q == 16'd1);
+    // last_word fires when rem==1; comparator now bounded to WPN_BITS.
+    assign last_word   = (word_rem_r_q == WPN_BITS'(1));
 
     assign neuron_idx_next = neuron_clr ? 16'd0 : (neuron_idx_r_q + 16'd1);
-    assign word_rem_dec_w  = (word_rem_r_q != 16'd0) ? (word_rem_r_q - 16'd1) : 16'd0;
+    assign word_rem_dec_w  = (word_rem_r_q != '0) ? (word_rem_r_q - WPN_BITS'(1)) : '0;
 
     always_comb begin
         if (cfg_we)
-            word_rem_next = wpn_load;
+            word_rem_next = WPN_BITS'(wpn_load);
         else if (word_we && word_clr)
-            word_rem_next = wpn_r_q;
+            word_rem_next = WPN_BITS'(wpn_r_q);
         else if (word_we)
             word_rem_next = word_rem_dec_w;
         else

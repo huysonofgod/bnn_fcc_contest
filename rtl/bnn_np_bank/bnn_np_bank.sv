@@ -41,9 +41,14 @@ module bnn_np_bank #(
     logic                 np_last_aligned;
     logic                 mode_output_layer_sel_aligned;
 
+    // LOCAL_X_REG=1 when FANOUT_STAGES>=1: the last x pipeline register is
+    // moved inside each NP_datapath so Vivado co-locates it with acc_r_q,
+    // converting the 1.1 ns cross-NP fanout route into a short intra-NP path.
+    localparam int NP_LOCAL_X_REG = (FANOUT_STAGES > 0) ? 1 : 0;
+
     bnn_fanout_buf #(
         .WIDTH       (P_W),
-        .PIPE_STAGES (FANOUT_STAGES)
+        .PIPE_STAGES (FANOUT_STAGES > 0 ? FANOUT_STAGES - 1 : 0)
     ) u_x_align (
         .clk (clk),
         .rst (rst),
@@ -116,7 +121,8 @@ module bnn_np_bank #(
             neuron_processor #(
                 .P_W               (P_W),
                 .MAX_NEURON_INPUTS (FAN_IN),
-                .ACC_W             (ACC_W)
+                .ACC_W             (ACC_W),
+                .LOCAL_X_REG       (NP_LOCAL_X_REG)
             ) u_np (
                 .clk                   (clk),
                 .rst                   (rst),

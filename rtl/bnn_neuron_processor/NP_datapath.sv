@@ -3,7 +3,10 @@ module NP_datapath #(
     parameter int MAX_NEURON_INPUTS = 784,
 //    parameter int THRES_W           = 32,
 //    parameter int BEAT_PC_W         = $clog2(P_W + 1),
-    parameter int ACC_W             = $clog2(MAX_NEURON_INPUTS + 1)
+    parameter int ACC_W             = $clog2(MAX_NEURON_INPUTS + 1),
+    // When 1, register x_in locally so Vivado places x_r_q near acc_r_q,
+    // eliminating the long route from the shared u_x_align fanout register.
+    parameter int LOCAL_X_REG       = 0
 ) (
     input  logic                 clk,
     input  logic                 rst,
@@ -52,8 +55,22 @@ module NP_datapath #(
     logic                 final_threshold_pass_w;
 
 
+    // x_eff: when LOCAL_X_REG=1, capture x_in locally so Vivado packs
+    // x_r_q adjacent to acc_r_q rather than routing from the shared
+    // u_x_align fanout register that spans the entire NP bank.
+    logic [P_W-1:0] x_eff;
+    generate
+        if (LOCAL_X_REG) begin : g_x_local
+            logic [P_W-1:0] x_r_q;
+            always_ff @(posedge clk) x_r_q <= x_in;
+            assign x_eff = x_r_q;
+        end else begin : g_x_pass
+            assign x_eff = x_in;
+        end
+    endgenerate
+
     // Compute XNOR and popcount
-    assign xnor_bits = ~(x_in ^ w_in);
+    assign xnor_bits = ~(x_eff ^ w_in);
     assign beat_popcount = $countones(xnor_bits);
     // Extend popcount to match accumulator width and compute final sum
     assign beat_popcount_ext = ACC_W'(beat_popcount);
@@ -70,13 +87,11 @@ module NP_datapath #(
             acc_r_q <= acc_mux_o;
         end
 
-        // Final-beat score/threshold capture. The old implementation compared
-        // acc_next against threshold_in and wrote activation_r_q in the same
-        // cycle, putting XNOR/popcount/add/compare on one 1 ns path. This
-        // stage keeps the final score exact while moving the threshold compare
-        // to the following cycle from local registers.
+        // Final score capture happens in RESET, one cycle after the last beat
+        // has been accumulated. Read the registered sum before the same edge
+        // clears acc_r_q via non-blocking assignment semantics.
         if (valid_out_we) begin
-            final_score_r_q        <= acc_next;
+            final_score_r_q        <= acc_r_q;
             final_threshold_r_q    <= threshold_in;
             final_output_mode_r_q  <= mode_output_layer_sel;
             final_result_valid_r_q <= 1'b1;

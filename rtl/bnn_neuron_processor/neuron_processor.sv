@@ -1,7 +1,8 @@
 module neuron_processor #(
     parameter int P_W               = 8,
     parameter int MAX_NEURON_INPUTS = 784,
-    parameter int ACC_W             = $clog2(MAX_NEURON_INPUTS + 1)
+    parameter int ACC_W             = $clog2(MAX_NEURON_INPUTS + 1),
+    parameter int LOCAL_X_REG       = 0
 ) (
     input  logic                 clk,
     input  logic                 rst,
@@ -50,7 +51,8 @@ module neuron_processor #(
     NP_datapath #(
         .P_W               (P_W),
         .MAX_NEURON_INPUTS (MAX_NEURON_INPUTS),
-        .ACC_W             (ACC_W)
+        .ACC_W             (ACC_W),
+        .LOCAL_X_REG       (LOCAL_X_REG)
     ) u_dp (
         .clk                  (clk),
         .rst                  (rst),
