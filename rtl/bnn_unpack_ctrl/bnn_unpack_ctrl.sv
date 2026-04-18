@@ -33,11 +33,12 @@ module bnn_unpack_ctrl #(
     output logic                  pad_sel
 );
 
-    typedef enum logic [1:0] {
-        IDLE       = 2'd0,
-        ACCUMULATE = 2'd1,
-        EMIT       = 2'd2,
-        PAD_EMIT   = 2'd3
+    typedef enum logic [2:0] {
+        IDLE        = 3'd0,
+        ACCUMULATE  = 3'd1,
+        EMIT        = 3'd2,
+        PAD_EMIT    = 3'd3,
+        NEXT_NEURON = 3'd4
     } state_t;
 
     state_t state_r, next_state;
@@ -96,15 +97,7 @@ module bnn_unpack_ctrl #(
                     end else if (neuron_bytes_done && (bits_after_byte > '0)) begin
                         next_state = PAD_EMIT;
                     end else if (neuron_bytes_done) begin
-                        neur_byte_clr = 1'b1;
-                        neuron_we     = 1'b1;
-                        word_we       = 1'b1;
-                        word_clr      = 1'b1;
-
-                        if (last_neuron)
-                            next_state = IDLE;
-                        else
-                            next_state = ACCUMULATE;
+                        next_state = NEXT_NEURON;
                     end
                 end
             end
@@ -122,17 +115,7 @@ module bnn_unpack_ctrl #(
                     word_clr  = 1'b0;
 
                     if (last_word) begin
-                        accum_sel     = 2'b10;
-                        bits_sel      = 2'b10;
-                        neuron_we     = 1'b1;
-                        neur_byte_we  = 1'b1;
-                        neur_byte_clr = 1'b1;
-                        word_clr      = 1'b1;
-
-                        if (last_neuron)
-                            next_state = IDLE;
-                        else
-                            next_state = ACCUMULATE;
+                        next_state = NEXT_NEURON;
                     end else if (bits_after_emit >= BIA_W'(P_W)) begin
                         next_state = EMIT;
                     end else if (neuron_bytes_complete && (bits_after_emit > '0)) begin
@@ -148,21 +131,25 @@ module bnn_unpack_ctrl #(
 
                 if (output_slot_open) begin
                     txn_we        = 1'b1;
-                    accum_we      = 1'b1;
-                    accum_sel     = 2'b10;
-                    bits_we       = 1'b1;
-                    bits_sel      = 2'b10;
-                    word_we       = 1'b1;
-                    word_clr      = 1'b1;
-                    neuron_we     = 1'b1;
-                    neur_byte_we  = 1'b1;
-                    neur_byte_clr = 1'b1;
-
-                    if (last_neuron)
-                        next_state = IDLE;
-                    else
-                        next_state = ACCUMULATE;
+                    next_state    = NEXT_NEURON;
                 end
+            end
+
+            NEXT_NEURON: begin
+                accum_we      = 1'b1;
+                accum_sel     = 2'b10;
+                bits_we       = 1'b1;
+                bits_sel      = 2'b10;
+                neur_byte_we  = 1'b1;
+                neur_byte_clr = 1'b1;
+                neuron_we     = 1'b1;
+                word_we       = 1'b1;
+                word_clr      = 1'b1;
+
+                if (last_neuron)
+                    next_state = IDLE;
+                else
+                    next_state = ACCUMULATE;
             end
 
             default: next_state = IDLE;
