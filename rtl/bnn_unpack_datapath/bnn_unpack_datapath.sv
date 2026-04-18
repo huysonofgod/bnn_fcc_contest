@@ -190,7 +190,7 @@ module bnn_unpack_datapath #(
     // For STATIC_BPN=98 → 7 bits; STATIC_BPN=32 → 6 bits.
     localparam int BPN_BITS = (STATIC_BYTES_PER_NEURON > 0)
                               ? $clog2(STATIC_BYTES_PER_NEURON + 1) : 16;
-    (* max_fanout = 2 *) logic [BPN_BITS-1:0] neuron_byte_rem_r_q;
+    logic [BPN_BITS-1:0] neuron_byte_rem_r_q;
     logic [BPN_BITS-1:0] neuron_byte_rem_dec_w;
     logic [BPN_BITS-1:0] neuron_byte_rem_next;
 

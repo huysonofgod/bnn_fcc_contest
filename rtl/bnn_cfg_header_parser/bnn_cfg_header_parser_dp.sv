@@ -89,7 +89,7 @@ module bnn_cfg_header_parser_dp (
             total_bytes_r_q <= 32'd0;
     end
 
-    (* max_fanout = 2 *) logic [31:0] payload_byte_cnt_r_q;
+    logic [31:0] payload_byte_cnt_r_q;
     logic [31:0] pld_byte_cnt_next;
 
     // payload_done: last payload byte (down counter reaches 1)
