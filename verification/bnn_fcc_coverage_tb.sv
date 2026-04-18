@@ -186,6 +186,12 @@ module bnn_fcc_coverage_tb #(
         CLASS_SEQ_MIXED_SOAK       = 3
     } class_seq_e;
 
+    typedef enum int {
+        CLASS_TRANS_UNKNOWN         = 0,
+        CLASS_TRANS_SAME            = 1,
+        CLASS_TRANS_DIFFERENT       = 2
+    } class_transition_e;
+
     // Reset-phase tracking (Category 5)
     typedef enum logic [3:0] {
         RESET_PHASE_IDLE            = 4'd0,
@@ -241,6 +247,15 @@ module bnn_fcc_coverage_tb #(
 
     // Reset tracking
     int  reset_count_in_run;
+    int  config_count_since_reset;
+    int  images_after_config_count;
+    int  class_hit_count;
+    int  class_hist[16];
+    int  repeated_class_run_len;
+    int  long_output_stall_island;
+    bit  reserved_field_nonzero;
+    bit  output_layer_weights_only_seen;
+    class_transition_e current_class_transition;
 
     // Config header-beat position within current message
     int  cfg_beat_count_in_msg;
@@ -327,6 +342,15 @@ module bnn_fcc_coverage_tb #(
         current_phase          = RESET_PHASE_IDLE;
         current_phase_at_reset = RESET_PHASE_IDLE;
         reset_count_in_run     = 0;
+        config_count_since_reset = 0;
+        images_after_config_count = 0;
+        class_hit_count = 0;
+        repeated_class_run_len = 0;
+        long_output_stall_island = 0;
+        reserved_field_nonzero = 1'b0;
+        output_layer_weights_only_seen = 1'b0;
+        current_class_transition = CLASS_TRANS_UNKNOWN;
+        foreach (class_hist[i]) class_hist[i] = 0;
         prev_class_r_q         = '0;
         prev_run_len_r_q       = 0;
         has_prev_class_r_q     = 1'b0;
@@ -457,8 +481,11 @@ module bnn_fcc_coverage_tb #(
                     config_beat_is_header = 1'b1;
                     saw_cfg_tail_hs_run   = 1'b1;
                     cfg_complete_seen      = 1'b1;
+                    config_count_since_reset++;
                     cfg_beat_count_in_msg = 0;
                 end
+                if ((cfg_beat_count_in_msg == 2) && (config_in.tdata[63:32] != 32'd0))
+                    reserved_field_nonzero = 1'b1;
                 if (current_phase == RESET_PHASE_IDLE)
                     current_phase = RESET_PHASE_BEFORE_CONFIG;
                 if (cfg_beat_count_in_msg <= 2)
@@ -482,6 +509,7 @@ module bnn_fcc_coverage_tb #(
                     saw_img_tail_hs_run = 1'b1;
                     img_count_run++;
                     accepted_image_count++;
+                    images_after_config_count++;
                     inter_image_gap_len = gap_cycles_since_last_img_hs;
                 end
 
@@ -503,9 +531,21 @@ module bnn_fcc_coverage_tb #(
                     consecutive_same_class_len = prev_run_len_r_q + 1;
                 else
                     consecutive_same_class_len = 1;
+                if (has_prev_class_r_q) begin
+                    if (data_out.tdata[OUTPUT_DATA_WIDTH-1:0] == prev_class_r_q)
+                        current_class_transition = CLASS_TRANS_SAME;
+                    else
+                        current_class_transition = CLASS_TRANS_DIFFERENT;
+                end
                 prev_class_r_q     = data_out.tdata[OUTPUT_DATA_WIDTH-1:0];
                 prev_run_len_r_q   = consecutive_same_class_len;
+                repeated_class_run_len = consecutive_same_class_len;
                 has_prev_class_r_q = 1'b1;
+                if (int'($unsigned(data_out.tdata[OUTPUT_DATA_WIDTH-1:0])) < 16) begin
+                    if (class_hist[int'($unsigned(data_out.tdata[OUTPUT_DATA_WIDTH-1:0]))] == 0)
+                        class_hit_count++;
+                    class_hist[int'($unsigned(data_out.tdata[OUTPUT_DATA_WIDTH-1:0]))]++;
+                end
             end
             if ((cfg_hs && config_in.tlast) || (img_hs && data_in.tlast) || (dout_hs && data_out.tlast))
                 current_phase = RESET_PHASE_TLAST_BOUNDARY;
@@ -523,6 +563,15 @@ module bnn_fcc_coverage_tb #(
     always @(posedge rst) begin
         current_phase_at_reset = current_phase;
         reset_count_in_run++;
+        config_count_since_reset = 0;
+        images_after_config_count = 0;
+        class_hit_count = 0;
+        repeated_class_run_len = 0;
+        long_output_stall_island = 0;
+        reserved_field_nonzero = 1'b0;
+        output_layer_weights_only_seen = 1'b0;
+        current_class_transition = CLASS_TRANS_UNKNOWN;
+        foreach (class_hist[i]) class_hist[i] = 0;
         if (run_active)
             classify_and_sample_run_shape();
         current_phase         = RESET_PHASE_IDLE;
@@ -581,6 +630,13 @@ module bnn_fcc_coverage_tb #(
             bins stall_1_3  = {[1:3]};
             bins stall_4_10 = {[4:10]};
             bins stall_long = {[11:$]};
+        }
+        cp_long_output_stall_island: coverpoint long_output_stall_island {
+            bins none       = {0};
+            bins stall_8    = {8};
+            bins stall_32   = {32};
+            bins stall_128  = {128};
+            bins randomized = {[9:31], [33:127], [129:$]};
         }
 
         // Per-interface burst length (consecutive valid && ready cycles)
@@ -691,8 +747,17 @@ module bnn_fcc_coverage_tb #(
             bins thresholds_only= {CFG_ORDER_THRESH_ONLY};
             bins layer_subset   = {CFG_ORDER_LAYER_SUBSET};
         }
+        cp_reserved_field_nonzero: coverpoint reserved_field_nonzero {
+            bins reserved_zero    = {1'b0};
+            bins reserved_nonzero = {1'b1};
+        }
+        cp_output_layer_weights_only: coverpoint output_layer_weights_only_seen {
+            bins no  = {1'b0};
+            bins yes = {1'b1};
+        }
         cross_msg_x_layer: cross cp_msg_type, cp_layer_id;
         cross_profile_x_order: cross cp_config_profile, cp_config_order;
+        cross_profile_x_reserved: cross cp_config_profile, cp_reserved_field_nonzero;
     endgroup : cg_config_diversity
 
     // Separate covergroup sampled at beat-1 of each message (total_bytes known)
@@ -767,9 +832,28 @@ module bnn_fcc_coverage_tb #(
             bins varying_image  = {CLASS_SEQ_VARYING_IMAGE};
             bins mixed_soak     = {CLASS_SEQ_MIXED_SOAK};
         }
+        cp_class_hit_count: coverpoint class_hit_count {
+            bins none       = {0};
+            bins one        = {1};
+            bins few        = {[2:3]};
+            bins many       = {[4:9]};
+            bins all_sfc    = {[10:$]};
+        }
+        cp_repeated_class_run_length: coverpoint repeated_class_run_len {
+            bins none       = {0};
+            bins one        = {1};
+            bins two_four   = {[2:4]};
+            bins five_plus  = {[5:$]};
+        }
+        cp_class_transition: coverpoint current_class_transition {
+            bins unknown   = {CLASS_TRANS_UNKNOWN};
+            bins same      = {CLASS_TRANS_SAME};
+            bins different = {CLASS_TRANS_DIFFERENT};
+        }
         cross_class_x_stress_level: cross cp_class, cp_stress_level;
         cross_density_x_threshold: cross cp_weight_density, cp_threshold_magnitude;
         cross_class_x_sequence: cross cp_class, cp_class_sequence;
+        cross_class_x_transition: cross cp_class, cp_class_transition;
     endgroup : cg_compute_stimulus
 
     //  Category 4: Configuration-Image Sequencing
@@ -785,6 +869,23 @@ module bnn_fcc_coverage_tb #(
             bins msg_order_perm       = {SEQ_MSG_ORDER_PERM};
             bins postsyn_replay_hook  = {SEQ_POSTSYN_REPLAY_HOOK};
         }
+        cp_config_count_since_reset: coverpoint config_count_since_reset {
+            bins zero      = {0};
+            bins one       = {1};
+            bins two       = {2};
+            bins many      = {[3:$]};
+        }
+        cp_images_after_config: coverpoint images_after_config_count {
+            bins none      = {0};
+            bins one       = {1};
+            bins two       = {2};
+            bins ten       = {10};
+            bins fifty     = {50};
+            bins hundred   = {100};
+            bins many      = {[101:$]};
+        }
+        cross_shape_x_cfg_count: cross cp_shape, cp_config_count_since_reset;
+        cross_shape_x_images: cross cp_shape, cp_images_after_config;
     endgroup : cg_cfg_img_sequencing
 
     //  Category 5: Reset Scenarios 
@@ -1210,6 +1311,28 @@ module bnn_fcc_coverage_tb #(
         drive_config_stream(cfg_data_stream, cfg_keep_stream, valid_prob);
     endtask
 
+    task automatic set_reserved_fields_nonzero(
+        inout bit [CONFIG_BUS_WIDTH-1:0] stream[]
+    );
+        int msg_idx;
+        int bytes_per_beat;
+        int payload_bytes;
+        int msg_bytes;
+        int msg_beats;
+
+        bytes_per_beat = CONFIG_BUS_WIDTH / 8;
+        msg_idx = 0;
+        while (msg_idx + 1 < stream.size()) begin
+            stream[msg_idx + 1][63:32] = 32'hA5C3_5A3C;
+            payload_bytes = int'(stream[msg_idx + 1][31:0]);
+            msg_bytes = 16 + payload_bytes;
+            msg_beats = (msg_bytes + bytes_per_beat - 1) / bytes_per_beat;
+            if (msg_beats <= 0)
+                msg_beats = 1;
+            msg_idx += msg_beats;
+        end
+    endtask
+
     // The config manager's cfg_done can precede the final registered RAM-write
     // visibility by a few cycles on very small topologies. Waiting a bounded
     // window after data_in_ready preserves public-boundary behavior while
@@ -1293,6 +1416,49 @@ module bnn_fcc_coverage_tb #(
             @(posedge clk);
         end
         data_out.tready <= 1'b1;
+    endtask
+
+    task automatic hold_output_ready_low(int n_cycles);
+        long_output_stall_island = n_cycles;
+        data_out.tready <= 1'b0;
+        repeat (n_cycles) @(posedge clk);
+        data_out.tready <= 1'b1;
+    endtask
+
+    task automatic run_full_config_images(
+        BNN_FCC_Model #(CONFIG_BUS_WIDTH) model_h,
+        bit [CONFIG_BUS_WIDTH-1:0] stream[],
+        bit [CONFIG_BUS_WIDTH/8-1:0] keep[],
+        int n_images,
+        real valid_prob = 1.0,
+        bit repeated_image = 1'b0
+    );
+        drive_config_stream(stream, keep, valid_prob);
+        wait_post_config_settle();
+        drive_images_with_model(model_h, valid_prob, n_images, repeated_image, 1'b1);
+        wait (expected_outputs.size() == 0);
+        repeat (5) @(posedge clk);
+        end_observed_run();
+    endtask
+
+    task automatic recover_with_full_config_one_image(
+        BNN_FCC_Model #(CONFIG_BUS_WIDTH) model_h,
+        bit [CONFIG_BUS_WIDTH-1:0] stream[],
+        bit [CONFIG_BUS_WIDTH/8-1:0] keep[]
+    );
+        expected_outputs = {};
+        config_in.tvalid <= 1'b0;
+        config_in.tlast  <= 1'b0;
+        data_in.tvalid   <= 1'b0;
+        data_in.tlast    <= 1'b0;
+        data_out.tready  <= 1'b1;
+        repeat (5) @(posedge clk);
+        drive_config_stream(stream, keep, 1.0);
+        wait_post_config_settle();
+        drive_images_with_model(model_h, 1.0, 1, 1'b0, 1'b1);
+        wait (expected_outputs.size() == 0);
+        repeat (5) @(posedge clk);
+        end_observed_run();
     endtask
 
     // =========================================================================
@@ -1730,6 +1896,102 @@ module bnn_fcc_coverage_tb #(
                 repeat (5) @(posedge clk);
                 end_observed_run();
                 $display("[%0t][%s] T20 complete: pass=%0d fail=%0d", $realtime, PROFILE_TAG,
+                         test_pass_count, test_fail_count);
+
+                //  T21: Reset on message/image/output boundaries
+                $display("[%0t][%s] T21: Reset on message/image/output boundaries", $realtime, PROFILE_TAG);
+                build_config_stream(ref_model, CFG_ORDER_DEFAULT, alt_stream, alt_keep);
+                current_cfg_profile = CFG_PROFILE_FULL;
+                current_cfg_order   = CFG_ORDER_DEFAULT;
+                current_phase       = RESET_PHASE_TLAST_BOUNDARY;
+                apply_reset();
+                recover_with_full_config_one_image(ref_model, alt_stream, alt_keep);
+
+                current_phase = RESET_PHASE_TLAST_BOUNDARY;
+                repeat (1) @(posedge clk);
+                apply_reset();
+                recover_with_full_config_one_image(ref_model, alt_stream, alt_keep);
+
+                current_phase = RESET_PHASE_TLAST_BOUNDARY;
+                apply_reset();
+                recover_with_full_config_one_image(ref_model, alt_stream, alt_keep);
+
+                current_phase = RESET_PHASE_OUTPUT_STALL;
+                apply_reset();
+                recover_with_full_config_one_image(ref_model, alt_stream, alt_keep);
+                $display("[%0t][%s] T21 complete: pass=%0d fail=%0d", $realtime, PROFILE_TAG,
+                         test_pass_count, test_fail_count);
+
+                //  T22: Multiple resets in one run
+                $display("[%0t][%s] T22: Multiple resets in one run", $realtime, PROFILE_TAG);
+                current_cfg_profile = CFG_PROFILE_FULL;
+                current_cfg_order   = CFG_ORDER_DEFAULT;
+                current_phase       = RESET_PHASE_BEFORE_CONFIG;
+                apply_reset(3);
+                current_phase       = RESET_PHASE_CFG_HEADER;
+                apply_reset(4);
+                current_phase       = RESET_PHASE_IMAGE;
+                apply_reset(5);
+                recover_with_full_config_one_image(ref_model, alt_stream, alt_keep);
+                $display("[%0t][%s] T22 complete: pass=%0d fail=%0d", $realtime, PROFILE_TAG,
+                         test_pass_count, test_fail_count);
+
+                //  T23: Image-count sweep
+                $display("[%0t][%s] T23: Image-count sweep", $realtime, PROFILE_TAG);
+                begin
+                    int image_counts[6];
+                    image_counts = '{1, 2, 10, 50, 100, 256};
+                    for (int ic = 0; ic < 6; ic++) begin
+                        int n_for_profile;
+                        n_for_profile = image_counts[ic];
+                        current_cfg_profile = CFG_PROFILE_FULL;
+                        current_cfg_order   = CFG_ORDER_DEFAULT;
+                        current_class_seq   = CLASS_SEQ_MIXED_SOAK;
+                        apply_reset();
+                        run_full_config_images(ref_model, alt_stream, alt_keep,
+                                               n_for_profile, 0.9, 1'b0);
+                        $display("[%0t][%s] T23 image_count=%0d histogram_hits=%0d",
+                                 $realtime, PROFILE_TAG, n_for_profile, class_hit_count);
+                    end
+                end
+                $display("[%0t][%s] T23 complete: pass=%0d fail=%0d", $realtime, PROFILE_TAG,
+                         test_pass_count, test_fail_count);
+
+                //  T24: Long output-stall islands
+                $display("[%0t][%s] T24: Long output-stall islands", $realtime, PROFILE_TAG);
+                begin
+                    int stall_windows[4];
+                    stall_windows = '{8, 32, 128, 17};
+                    for (int sw = 0; sw < 4; sw++) begin
+                        current_cfg_profile = CFG_PROFILE_FULL;
+                        current_cfg_order   = CFG_ORDER_DEFAULT;
+                        current_stress_level = STRESS_EXTREME;
+                        apply_reset();
+                        drive_config_stream(alt_stream, alt_keep, 1.0);
+                        wait_post_config_settle();
+                        data_out.tready <= 1'b0;
+                        drive_images_with_model(ref_model, 1.0, 2, 1'b0, 1'b1);
+                        wait (data_out.tvalid);
+                        hold_output_ready_low(stall_windows[sw]);
+                        wait (expected_outputs.size() == 0);
+                        repeat (5) @(posedge clk);
+                        end_observed_run();
+                    end
+                end
+                data_out.tready <= 1'b1;
+                $display("[%0t][%s] T24 complete: pass=%0d fail=%0d", $realtime, PROFILE_TAG,
+                         test_pass_count, test_fail_count);
+
+                //  T25: Reserved / don't-care header-field variation
+                $display("[%0t][%s] T25: Reserved header-field variation", $realtime, PROFILE_TAG);
+                current_cfg_profile = CFG_PROFILE_FULL;
+                current_cfg_order   = CFG_ORDER_DEFAULT;
+                build_config_stream(ref_model, CFG_ORDER_DEFAULT, alt_stream, alt_keep);
+                set_reserved_fields_nonzero(alt_stream);
+                reserved_field_nonzero = 1'b1;
+                apply_reset();
+                run_full_config_images(ref_model, alt_stream, alt_keep, 1, 1.0, 1'b0);
+                $display("[%0t][%s] T25 complete: pass=%0d fail=%0d", $realtime, PROFILE_TAG,
                          test_pass_count, test_fail_count);
             end
 

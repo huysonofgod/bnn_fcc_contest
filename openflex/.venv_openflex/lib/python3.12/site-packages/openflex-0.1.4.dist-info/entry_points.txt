@@ -1,0 +1,2 @@
+[console_scripts]
+openflex = openflex.main:run

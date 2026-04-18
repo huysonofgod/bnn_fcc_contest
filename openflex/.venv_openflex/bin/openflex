@@ -1,0 +1,6 @@
+#!/run/host/home/hdo/Documents/A_official_bnn_project/bnn_fcc_contest/openflex/.venv_openflex/bin/python
+import sys
+from openflex.main import run
+if __name__ == '__main__':
+    sys.argv[0] = sys.argv[0].removesuffix('.exe')
+    sys.exit(run())
